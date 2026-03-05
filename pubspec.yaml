@@ -2,7 +2,7 @@ name: dirxplore
 description: "DirXplore - HTTP/FTP Open Directory Browser & Download Manager"
 publish_to: 'none'
 
-version: 1.0.5+4
+version: 1.0.6+5
 
 environment:
   sdk: ^3.5.0
