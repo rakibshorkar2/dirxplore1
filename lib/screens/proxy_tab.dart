@@ -21,6 +21,11 @@ class ProxyTab extends StatelessWidget {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.speed),
+            tooltip: 'Test All',
+            onPressed: () => proxyProvider.testAllProxies(),
+          ),
+          IconButton(
             icon: const Icon(Icons.file_upload),
             tooltip: 'Import YAML',
             onPressed: () => _importYamlProxies(context),

@@ -38,34 +38,37 @@ class AppProxyProvider with ChangeNotifier {
   Future<void> _loadProxies() async {
     if (_db == null) return;
     final maps = await _db!.query('proxies');
-    
+
     if (maps.isEmpty) {
-      final defaultProxy = ProxyModel.fromUri('socks5://test:test@103.166.253.92:1088');
+      final defaultProxy =
+          ProxyModel.fromUri('socks5://test:test@103.166.253.92:1088');
       if (defaultProxy != null) {
         defaultProxy.isActive = true;
         await _db!.insert('proxies', defaultProxy.toMap());
         return _loadProxies(); // Reload after insert
       }
     }
-    
+
     _proxies = maps.map((m) => ProxyModel.fromMap(m)).toList();
-    
+
     // Automatically apply active proxy to Dio
     final active = activeProxy;
     DioClient().setProxy(active);
-    
+
     notifyListeners();
   }
 
   Future<void> addProxy(ProxyModel proxy) async {
     if (_db == null) return;
-    await _db!.insert('proxies', proxy.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await _db!.insert('proxies', proxy.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
     await _loadProxies();
   }
 
   Future<void> updateProxy(ProxyModel proxy) async {
     if (_db == null) return;
-    await _db!.update('proxies', proxy.toMap(), where: 'id = ?', whereArgs: [proxy.id]);
+    await _db!.update('proxies', proxy.toMap(),
+        where: 'id = ?', whereArgs: [proxy.id]);
     await _loadProxies();
   }
 
@@ -77,13 +80,14 @@ class AppProxyProvider with ChangeNotifier {
 
   Future<void> toggleProxy(String id, bool active) async {
     if (_db == null) return;
-    
+
     // If turning one on, turn all others off first
     if (active) {
       await _db!.update('proxies', {'isActive': 0});
     }
-    
-    await _db!.update('proxies', {'isActive': active ? 1 : 0}, where: 'id = ?', whereArgs: [id]);
+
+    await _db!.update('proxies', {'isActive': active ? 1 : 0},
+        where: 'id = ?', whereArgs: [id]);
     await _loadProxies();
   }
 
@@ -93,6 +97,14 @@ class AppProxyProvider with ChangeNotifier {
     if (idx != -1) {
       _proxies[idx].latencyMs = ms;
       notifyListeners();
+    }
+  }
+
+  Future<void> testAllProxies() async {
+    // Run tests sequentially to avoid overwhelming network but with no delay between them
+    for (var proxy in _proxies) {
+      // testProxyLatency already handles notifyListeners()
+      await testProxyLatency(proxy);
     }
   }
 }
