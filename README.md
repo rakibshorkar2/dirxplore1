@@ -1,17 +1,42 @@
-# flutter2
+# 🚀 DirXplore
 
-A new Flutter project.
+**DirXplore** is a high-performance, premium Flutter application designed for power users who need to browse, crawl, and download from open directories (Apache/Nginx) with surgical precision.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## ✨ Cool Things About This Project
 
-A few resources to get you started if this is your first Flutter project:
+### 🌐 Advanced Browser & Deep Crawler
+- **Isolate-Powered Crawling**: BFS (Breadth-First Search) crawler that runs in a background isolate, ensuring the UI stays butter-smooth even while scanning thousands of folders.
+* **Smart Categorization**: Automatically filters for Movies, Series, Games, and Software using intelligent keyword mapping.
+* **Navigation Stack**: Robust history management with "Up", "Back", and "Sort" capabilities.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### 📥 Ultimate Download Manager
+* **Multi-Threaded Concurrency**: Download multiple files simultaneously with configurable limits.
+* **Pause & Resume**: Full support for `Range` headers and `206 Partial Content`, meaning you never lose progress.
+* **Liquid Glass UI**: Stunning progress bars with real-time speed tracking and ETA calculation.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 🛡️ Premium Proxy System
+* **App-Specific Tunneling**: Integrated support for **SOCKS5, SOCKS4, and HTTP** proxies that only affect internal `dio` traffic.
+* **One-Tap Switch**: Seamlessly toggle between multiple proxy configurations.
+* **Latency Testing**: Built-in ping tool to check proxy speed before connecting.
+
+### 💎 Liquid Glass Design
+* **Modern Aesthetics**: Built with a "Liquid Glass" design system, featuring vibrant gradients, deep blurs, and organic micro-animations.
+* **Dynamic Themes**: Seamless switching between Material Light, Dark, and a true **AMOLED Black** mode for OLED screens.
+
+### 🛠️ Tech Stack
+* **Flutter & Dart**: For a high-fidelity cross-platform experience.
+* **Dio Client**: For robust networking and custom proxy adapters.
+* **C++ Native Extensions**: High-performance hash calculation and file processing using Dart FFI.
+* **Provider**: Scalable and reactive state management.
+
+---
+
+## 🛠️ Getting Started
+
+1.  Clone the repository: `git clone https://github.com/rakibshorkar2/dirxplore1.git`
+2.  Install dependencies: `flutter pub get`
+3.  Run on Android: `flutter run --release`
+
+Created with ❤️ by **RAKIB**
