@@ -3,7 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 class GithubUpdater {
   static const String _githubApiUrl =
-      'https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/releases/latest'; // UPDATE THIS LATER
+      'https://api.github.com/repos/rakibshorkar2/dirxplore1/releases/latest';
 
   static Future<UpdateInfo?> checkUpdate({String? customRepoUrl}) async {
     try {
@@ -13,7 +13,7 @@ class GithubUpdater {
 
       final repoUrl = customRepoUrl ?? _githubApiUrl;
 
-      // Make request directly to github (ignoring proxy for updates to ensure reliability)
+      // Make request directly to github
       final response = await dio.get(repoUrl);
 
       if (response.statusCode == 200) {
@@ -25,11 +25,13 @@ class GithubUpdater {
         String? downloadUrl;
         if (assets != null && assets.isNotEmpty) {
           try {
+            // Priority: Assets ending with .apk
             final apkAsset =
                 assets.firstWhere((a) => a['name'].toString().endsWith('.apk'));
             downloadUrl = apkAsset['browser_download_url'];
           } catch (_) {
-            downloadUrl = assets[0]['browser_download_url']; // Fallback
+            // Fallback: Just take the first asset
+            downloadUrl = assets[0]['browser_download_url'];
           }
         }
 
@@ -37,9 +39,10 @@ class GithubUpdater {
           final packageInfo = await PackageInfo.fromPlatform();
           final currentVersion = packageInfo.version;
 
-          // Simple comparison, ignoring 'v' prefix
-          final lVersion = latestRef.replaceAll('v', '');
-          final cVersion = currentVersion.replaceAll('v', '');
+          // Normalize versions (remove 'v' and build numbers like +4)
+          final lVersion = latestRef.split('+')[0].replaceAll('v', '').trim();
+          final cVersion =
+              currentVersion.split('+')[0].replaceAll('v', '').trim();
 
           if (_isNewerVersion(cVersion, lVersion)) {
             return UpdateInfo(
@@ -66,6 +69,13 @@ class GithubUpdater {
         final l = i < lp.length ? lp[i] : 0;
         if (l > c) return true;
         if (l < c) return false;
+      }
+
+      // If x.y.z are equal, check if latest has more components or if we want to support build numbers
+      if (lp.length > cp.length) {
+        for (int i = cp.length; i < lp.length; i++) {
+          if (lp[i] > 0) return true;
+        }
       }
     } catch (_) {}
     return false;
