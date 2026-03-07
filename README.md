@@ -16,19 +16,26 @@
 * **Pause & Resume**: Full support for `Range` headers and `206 Partial Content`, meaning you never lose progress.
 * **Liquid Glass UI**: Stunning progress bars with real-time speed tracking and ETA calculation.
 
-### 🛡️ Premium Proxy System
-* **App-Specific Tunneling**: Integrated support for **SOCKS5, SOCKS4, and HTTP** proxies that only affect internal `dio` traffic.
-* **One-Tap Switch**: Seamlessly toggle between multiple proxy configurations.
-* **Latency Testing**: Built-in ping tool to check proxy speed before connecting.
+### � Premium Security & Privacy
+* **Biometric Unlock**: Secure the app using your device's fingerprint or face unlock. Optimized for in-display sensors with a glitch-free "Premium Fix" for Android.
+* **Inactivity Auto-Lock**: Automatically locks the app after 30s, 1m, or 2m of inactivity to keep your data safe.
+* **Privacy HUD**: High-quality hardware-accelerated blur effects on the lock screen protect your content from prying eyes.
+* **Custom Security Rules**: Set 4 or 6-digit PINs with dynamic UI indicators that match your security choice.
 
 ### 💎 Liquid Glass Design
 * **Modern Aesthetics**: Built with a "Liquid Glass" design system, featuring vibrant gradients, deep blurs, and organic micro-animations.
-* **Dynamic Themes**: Seamless switching between Material Light, Dark, and a true **AMOLED Black** mode for OLED screens.
+* **True AMOLED Black**: Pure `#000000` background across all tabs and containers, optimized for battery savings on OLED screens.
+* **Adaptive HUDs**: Real-time gesture-based volume and brightness overlays in the media player.
+
+### 🎬 Media & Interactive UX
+* **Gesture Controls**: Vertical swipe gestures on the media player for smooth brightness and volume adjustment.
+* **Isolate-Powered Hashing**: Lightning-fast file hash verification using high-performance C++ native code via FFI.
+* **Bulk Management**: Multi-select and one-tap "Clear All" features for the download queue and proxy manager.
 
 ### 🛠️ Tech Stack
 * **Flutter & Dart**: For a high-fidelity cross-platform experience.
 * **Dio Client**: For robust networking and custom proxy adapters.
-* **C++ Native Extensions**: High-performance hash calculation and file processing using Dart FFI.
+* **C++ Native Extensions**: Ultra-fast hashing and file processing using Dart FFI.
 * **Provider**: Scalable and reactive state management.
 
 ---
