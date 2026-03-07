@@ -127,7 +127,7 @@ class DownloadTab extends StatelessWidget {
                     itemCount: batchIds.length + 1,
                     itemBuilder: (context, index) {
                       if (index == batchIds.length) {
-                        return const SizedBox(height: 100);
+                        return const SizedBox(height: 140);
                       }
                       final bId = batchIds[index];
                       final items = grouped[bId]!;

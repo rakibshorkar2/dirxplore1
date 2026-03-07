@@ -18,6 +18,7 @@ class DownloadService : Service() {
         
         // Broadcast actions for MainActivity
         const val NOTIFICATION_ACTION_BROADCAST = "com.rakib.dirxplore.NOTIFICATION_ACTION"
+        const val CHANNEL_COMPLETE_ID = "DownloadCompleteChannel"
     }
 
     private val notificationManager: NotificationManager by lazy {
@@ -45,11 +46,23 @@ class DownloadService : Service() {
             "UPDATE_PROGRESS" -> {
                 val progress = intent.getIntExtra("progress", 0)
                 val speed = intent.getStringExtra("speed") ?: ""
+                val eta = intent.getStringExtra("eta") ?: ""
+                val size = intent.getStringExtra("size") ?: ""
                 isPaused = false
-                notificationManager.notify(id, createNotification(lastFilename, progress, speed, false))
+                notificationManager.notify(id, createNotification(lastFilename, progress, speed, false, eta, size))
             }
             "STOP_DOWNLOAD" -> {
+                val isSuccess = intent.getBooleanExtra("success", false)
+                val isError = intent.getBooleanExtra("error", false)
+                val filename = intent.getStringExtra("filename") ?: lastFilename
+                
                 stopForeground(true)
+                if (isSuccess) {
+                    showCompletionNotification(filename, "Download Complete")
+                } else if (isError) {
+                    val msg = intent.getStringExtra("error_msg") ?: "Download Failed"
+                    showCompletionNotification(filename, msg)
+                }
                 stopSelf()
             }
             ACTION_PAUSE, ACTION_RESUME, ACTION_CANCEL -> {
@@ -64,17 +77,37 @@ class DownloadService : Service() {
                 // Update notification state toggle if it's pause/resume
                 if (action == ACTION_PAUSE) {
                     isPaused = true
-                    notificationManager.notify(id, createNotification(lastFilename, -1, "Paused", true))
+                    notificationManager.notify(id, createNotification(lastFilename, -1, "Paused", true, "", ""))
                 } else if (action == ACTION_RESUME) {
                     isPaused = false
-                    notificationManager.notify(id, createNotification(lastFilename, -1, "Resuming...", false))
+                    notificationManager.notify(id, createNotification(lastFilename, -1, "Resuming...", false, "", ""))
                 }
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun createNotification(title: String, progress: Int, contentText: String, paused: Boolean): android.app.Notification {
+    private fun showCompletionNotification(fileName: String, status: String) {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, pendingIntentFlags)
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_COMPLETE_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(fileName)
+            .setContentText(status)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
+    }
+
+    private fun createNotification(title: String, progress: Int, contentText: String, paused: Boolean, eta: String = "", size: String = ""): android.app.Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -100,14 +133,20 @@ class DownloadService : Service() {
         val cancelPendingIntent = PendingIntent.getService(this, 2, cancelIntent, pendingIntentFlags)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(contentText)
+            .setSubText("DirXplore")
+            .setContentTitle(title) // Filename
+            .setContentText(if (eta.isNotEmpty()) "$contentText • ETA: $eta" else contentText) 
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(actionIcon, actionLabel, actionPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
+
+        if (size.isNotEmpty()) {
+            builder.setSubText(size)
+        }
 
         if (progress >= 0) {
             builder.setProgress(100, progress, progress == 0)
@@ -124,6 +163,13 @@ class DownloadService : Service() {
                 NotificationManager.IMPORTANCE_LOW 
             )
             notificationManager.createNotificationChannel(serviceChannel)
+
+            val completeChannel = NotificationChannel(
+                CHANNEL_COMPLETE_ID,
+                "Download Complete Notifications",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+            notificationManager.createNotificationChannel(completeChannel)
         }
     }
 

@@ -415,12 +415,14 @@ class _BrowserTabState extends State<BrowserTab> {
                                             size: 22),
                                         tooltip: 'Play in app',
                                         onPressed: () {
+                                          final tunnelUrl = ProxyTunnel()
+                                              .getTunnelUrl(item.url);
                                           Navigator.push(
                                               context,
                                               MaterialPageRoute(
                                                 builder: (_) =>
                                                     MediaPlayerScreen(
-                                                        url: item.url,
+                                                        url: tunnelUrl,
                                                         title: item.name),
                                               ));
                                         },
@@ -548,11 +550,12 @@ class _BrowserTabState extends State<BrowserTab> {
                   title: const Text('Play in App'),
                   onTap: () {
                     Navigator.pop(ctx);
+                    final tunnelUrl = ProxyTunnel().getTunnelUrl(item.url);
                     Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => MediaPlayerScreen(
-                              url: item.url, title: item.name),
+                              url: tunnelUrl, title: item.name),
                         ));
                   },
                 ),
@@ -612,11 +615,12 @@ class _BrowserTabState extends State<BrowserTab> {
                 title: const Text('Download using 1DM'),
                 onTap: () async {
                   Navigator.pop(ctx);
+                  final tunnelUrl = ProxyTunnel().getTunnelUrl(item.url);
                   try {
                     final intent = AndroidIntent(
                       action: 'action_view',
                       package: 'idm.internet.download.manager',
-                      data: item.url,
+                      data: tunnelUrl,
                       flags: [Flag.FLAG_ACTIVITY_NEW_TASK],
                     );
                     await intent.launch();

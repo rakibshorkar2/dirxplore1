@@ -1,3 +1,5 @@
+import 'dart:math';
+
 // ignore_for_file: constant_identifier_names
 enum ProxyProtocol { SOCKS5, SOCKS4, HTTP, HTTPS }
 
@@ -40,7 +42,14 @@ class ProxyModel {
   /// Parse from a URI string like socks5://user:pass@1.2.3.4:1080
   static ProxyModel? fromUri(String raw) {
     try {
-      final uri = Uri.parse(raw.trim());
+      // Sanitize: remove spaces (some users might have spaces before/after delimiters)
+      // and remove trailing slashes which aren't needed for basic proxy config
+      var sanitized = raw.trim().replaceAll(' ', '');
+      if (sanitized.endsWith('/')) {
+        sanitized = sanitized.substring(0, sanitized.length - 1);
+      }
+
+      final uri = Uri.parse(sanitized);
       ProxyProtocol proto;
       switch (uri.scheme.toLowerCase()) {
         case 'socks5':
@@ -56,7 +65,8 @@ class ProxyModel {
           proto = ProxyProtocol.HTTP;
       }
       return ProxyModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: DateTime.now().millisecondsSinceEpoch.toString() +
+            (Random().nextInt(1000).toString()),
         protocol: proto,
         host: uri.host,
         port: uri.port,

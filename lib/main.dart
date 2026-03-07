@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'dart:ui'; // Added for ImageFilter
+import 'dart:async'; // Added for Timer
 import 'package:local_auth/local_auth.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:workmanager/workmanager.dart';
+import 'screens/pin_lock_screen.dart'; // New import
 
 import 'providers/app_state.dart';
 import 'providers/proxy_provider.dart';
@@ -157,13 +159,14 @@ class OpenDirApp extends StatelessWidget {
         }
 
         // Apply True AMOLED Black if requested
-        if (appState.trueAmoledDark) {
+        if (appState.trueAmoledDark && appState.themeMode != ThemeMode.light) {
           darkScheme = darkScheme.copyWith(
             surface: Colors.black,
             surfaceContainerLowest: Colors.black,
-            surfaceContainerLow:
-                const Color(0xFF0D1117), // Slightly lighter for containers
-            surfaceContainer: const Color(0xFF161B22),
+            surfaceContainerLow: Colors.black,
+            surfaceContainer: const Color(0xFF0D1117), // Very subtle contrast
+            surfaceContainerHigh: const Color(0xFF161B22),
+            surfaceContainerHighest: const Color(0xFF1C2128),
           );
         }
 
@@ -175,10 +178,16 @@ class OpenDirApp extends StatelessWidget {
           ),
           darkTheme: ThemeData.dark(useMaterial3: true).copyWith(
             colorScheme: darkScheme,
-            scaffoldBackgroundColor:
-                appState.trueAmoledDark ? Colors.black : null,
+            scaffoldBackgroundColor: (appState.trueAmoledDark &&
+                    appState.themeMode != ThemeMode.light)
+                ? Colors.black
+                : null,
             appBarTheme: AppBarTheme(
-              backgroundColor: appState.trueAmoledDark ? Colors.black : null,
+              backgroundColor: (appState.trueAmoledDark &&
+                      appState.themeMode != ThemeMode.light)
+                  ? Colors.black
+                  : null,
+              surfaceTintColor: Colors.transparent,
             ),
           ),
           home: const BiometricLockWrapper(child: MainLayout()),
@@ -339,6 +348,9 @@ class BiometricLockWrapper extends StatefulWidget {
 class _BiometricLockWrapperState extends State<BiometricLockWrapper>
     with WidgetsBindingObserver {
   bool _isAuthenticated = false;
+  bool _isAuthenticating = false;
+  DateTime? _lastAuthSuccessTime; // Added for cool-down
+  Timer? _inactivityTimer;
   final LocalAuthentication _auth = LocalAuthentication();
 
   @override
@@ -351,39 +363,94 @@ class _BiometricLockWrapperState extends State<BiometricLockWrapper>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _inactivityTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final now = DateTime.now();
+
     if (state == AppLifecycleState.resumed) {
       final appState = Provider.of<AppState>(context, listen: false);
-      if (appState.requireBiometrics && _isAuthenticated) {
-        setState(() => _isAuthenticated = false);
-        _checkAuth();
+
+      // If we are already authenticated, check if we should show the lock screen again
+      // 1. Skip if we are currently in middle of an auth prompt.
+      // 2. Skip if we just successfully authenticated (cool-down to ignore redundant dialog close events).
+      if (appState.lockType != 'none' &&
+          _isAuthenticated &&
+          !_isAuthenticating) {
+        final timeSinceLastAuth = _lastAuthSuccessTime != null
+            ? now.difference(_lastAuthSuccessTime!)
+            : const Duration(hours: 1);
+
+        if (timeSinceLastAuth > const Duration(seconds: 3)) {
+          // Only lock if we were away and lock is immediate
+          if (appState.autoLockSeconds == 0) {
+            setState(() => _isAuthenticated = false);
+            _checkAuth();
+          } else {
+            _resetInactivityTimer();
+          }
+        } else {
+          _resetInactivityTimer();
+        }
+      } else if (_isAuthenticated) {
+        _resetInactivityTimer();
       }
     } else if (state == AppLifecycleState.paused) {
       final appState = Provider.of<AppState>(context, listen: false);
-      if (appState.requireBiometrics) {
+      // Immediately lock ONLY if auto-lock is set to Immediate and we're NOT authenticating.
+      // This prevents locking when the fingerprint prompt itself causes a partial pause/resume cycle.
+      if (appState.lockType != 'none' &&
+          appState.autoLockSeconds == 0 &&
+          !_isAuthenticating) {
         setState(() => _isAuthenticated = false);
       }
     }
   }
 
+  void _resetInactivityTimer() {
+    _inactivityTimer?.cancel();
+    if (!mounted) return;
+    final appState = Provider.of<AppState>(context, listen: false);
+    if (appState.autoLockSeconds > 0 && _isAuthenticated) {
+      _inactivityTimer = Timer(Duration(seconds: appState.autoLockSeconds), () {
+        if (mounted) {
+          setState(() {
+            _isAuthenticated = false;
+          });
+        }
+      });
+    }
+  }
+
   Future<void> _checkAuth() async {
     final appState = Provider.of<AppState>(context, listen: false);
-    if (!appState.requireBiometrics) {
+    if (appState.lockType == 'none') {
       setState(() => _isAuthenticated = true);
       return;
     }
 
+    if (appState.lockType == 'custom') {
+      // PinLockScreen handles its own auth
+      return;
+    }
+
+    if (_isAuthenticating) return;
+
     try {
+      setState(() => _isAuthenticating = true);
       final bool canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
       final bool canAuthenticate =
           canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
 
       if (!canAuthenticate) {
-        setState(() => _isAuthenticated = true);
+        setState(() {
+          _isAuthenticated = true;
+          _isAuthenticating = false;
+        });
+        _resetInactivityTimer();
         return;
       }
 
@@ -391,18 +458,39 @@ class _BiometricLockWrapperState extends State<BiometricLockWrapper>
         localizedReason: 'Please authenticate to access DirXplore',
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: false,
+          biometricOnly: false, // Allows PIN/Pattern/Face
         ),
       );
 
       if (mounted) {
-        setState(() => _isAuthenticated = didAuthenticate);
+        setState(() {
+          _isAuthenticated = didAuthenticate;
+          if (didAuthenticate) {
+            _lastAuthSuccessTime = DateTime.now();
+          }
+        });
+
+        // CRITICAL: Keep _isAuthenticating true for a short duration to ignore
+        // redundant lifecycle events firing right after the dialog closes.
+        await Future.delayed(const Duration(milliseconds: 800));
+
+        if (mounted) {
+          setState(() {
+            _isAuthenticating = false;
+          });
+          if (didAuthenticate) {
+            _resetInactivityTimer();
+          }
+        }
       }
     } catch (e) {
       debugPrint('Biometric Error: $e');
       if (mounted) {
-        setState(
-            () => _isAuthenticated = true); // Fallback to let user in if error
+        setState(() {
+          _isAuthenticated = true; // Fallback
+          _isAuthenticating = false;
+        });
+        _resetInactivityTimer();
       }
     }
   }
@@ -411,28 +499,65 @@ class _BiometricLockWrapperState extends State<BiometricLockWrapper>
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
 
-    if (!appState.requireBiometrics || _isAuthenticated) {
-      return widget.child;
+    if (appState.lockType == 'none' || _isAuthenticated) {
+      return Listener(
+        onPointerDown: (_) => _resetInactivityTimer(),
+        onPointerMove: (_) => _resetInactivityTimer(),
+        child: widget.child,
+      );
+    }
+
+    if (appState.lockType == 'custom') {
+      return PinLockScreen(
+        onAuthenticated: () {
+          setState(() => _isAuthenticated = true);
+          _resetInactivityTimer();
+        },
+      );
     }
 
     // Locked Screen
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.fingerprint, size: 100, color: Colors.blueAccent),
-            const SizedBox(height: 20),
-            const Text('App Locked',
-                style: TextStyle(color: Colors.white, fontSize: 24)),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _checkAuth,
-              child: const Text('Unlock'),
-            )
-          ],
-        ),
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+              child: Container(color: Colors.black.withValues(alpha: 0.8)),
+            ),
+          ),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.fingerprint,
+                    size: 100, color: Colors.blueAccent),
+                const SizedBox(height: 20),
+                const Text('App Locked',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                const Text('Unlock with your device security',
+                    style: TextStyle(color: Colors.white70, fontSize: 16)),
+                const SizedBox(height: 48),
+                ElevatedButton.icon(
+                  onPressed: _checkAuth,
+                  icon: const Icon(Icons.lock_open),
+                  label: const Text('Unlock Now'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 32, vertical: 16),
+                    textStyle: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                )
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -458,7 +583,7 @@ class FloatingDownloadBubble extends StatelessWidget {
           totalActive > 0 ? (totalProgress / totalActive) / 100 : 0.0;
 
       return Positioned(
-        bottom: 16,
+        bottom: 90,
         right: 16,
         child: Material(
           color: Colors.transparent,

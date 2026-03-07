@@ -65,6 +65,17 @@ class AppProxyProvider with ChangeNotifier {
     await _loadProxies();
   }
 
+  Future<void> addProxies(List<ProxyModel> proxies) async {
+    if (_db == null || proxies.isEmpty) return;
+    final batch = _db!.batch();
+    for (var proxy in proxies) {
+      batch.insert('proxies', proxy.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+    await _loadProxies();
+  }
+
   Future<void> updateProxy(ProxyModel proxy) async {
     if (_db == null) return;
     await _db!.update('proxies', proxy.toMap(),

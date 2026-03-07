@@ -18,6 +18,11 @@ class AppState with ChangeNotifier {
   bool _downloadOnWifiOnly = false;
   bool _pauseLowBattery = false;
   bool _requireBiometrics = false;
+  String _lockType = 'none'; // 'none', 'device', 'custom'
+  String _customPinHash = '';
+  String _securityQuestion = '';
+  String _securityAnswer = '';
+  int _autoLockSeconds = 0; // 0 = Immediate, 30, 60, 120
 
   ThemeMode get themeMode => _themeMode;
   String get defaultSavePath => _defaultSavePath;
@@ -34,6 +39,11 @@ class AppState with ChangeNotifier {
   bool get downloadOnWifiOnly => _downloadOnWifiOnly;
   bool get pauseLowBattery => _pauseLowBattery;
   bool get requireBiometrics => _requireBiometrics;
+  String get lockType => _lockType;
+  String get customPinHash => _customPinHash;
+  String get securityQuestion => _securityQuestion;
+  String get securityAnswer => _securityAnswer;
+  int get autoLockSeconds => _autoLockSeconds;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -57,6 +67,11 @@ class AppState with ChangeNotifier {
     _downloadOnWifiOnly = prefs.getBool('downloadOnWifiOnly') ?? false;
     _pauseLowBattery = prefs.getBool('pauseLowBattery') ?? false;
     _requireBiometrics = prefs.getBool('requireBiometrics') ?? false;
+    _lockType = prefs.getString('lockType') ?? 'none';
+    _customPinHash = prefs.getString('customPinHash') ?? '';
+    _securityQuestion = prefs.getString('securityQuestion') ?? '';
+    _securityAnswer = prefs.getString('securityAnswer') ?? '';
+    _autoLockSeconds = prefs.getInt('autoLockSeconds') ?? 0;
 
     // Load App Version
     final info = await PackageInfo.fromPlatform();
@@ -143,5 +158,47 @@ class AppState with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('requireBiometrics', val);
+  }
+
+  Future<void> setLockType(String type) async {
+    _lockType = type;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lockType', type);
+  }
+
+  Future<void> setCustomPin(String pin, String question, String answer) async {
+    _customPinHash = pin; // In real app, use sha256 or similar
+    _securityQuestion = question;
+    _securityAnswer = answer;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('customPinHash', pin);
+    await prefs.setString('securityQuestion', question);
+    await prefs.setString('securityAnswer', answer);
+  }
+
+  Future<void> resetCustomPin() async {
+    _customPinHash = '';
+    _securityQuestion = '';
+    _securityAnswer = '';
+    _lockType = 'none';
+    _requireBiometrics = false;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('customPinHash');
+    await prefs.remove('securityQuestion');
+    await prefs.remove('securityAnswer');
+    await prefs.setBool('requireBiometrics', false);
+    await prefs.setString('lockType', 'none');
+  }
+
+  bool get isSecurityEnabled => _lockType != 'none';
+
+  Future<void> setAutoLockSeconds(int seconds) async {
+    _autoLockSeconds = seconds;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('autoLockSeconds', seconds);
   }
 }

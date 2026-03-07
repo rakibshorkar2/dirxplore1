@@ -12,13 +12,13 @@ class BrowserProvider with ChangeNotifier {
   List<DirectoryItem> _items = [];
   bool _isLoading = false;
   String _errorMessage = '';
-  
+
   List<Map<String, String>> _bookmarks = [];
 
   BrowserProvider() {
     _loadBookmarks();
   }
-  
+
   // Sorting & Filtering
   String _searchQuery = '';
   String _selectedCategory = 'All Categories';
@@ -29,9 +29,10 @@ class BrowserProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String get errorMessage => _errorMessage;
   bool get canGoBack => _history.length > 1;
-  
+
   List<Map<String, String>> get bookmarks => _bookmarks;
-  bool get isCurrentBookmarked => _bookmarks.any((b) => b['url'] == _currentUrl);
+  bool get isCurrentBookmarked =>
+      _bookmarks.any((b) => b['url'] == _currentUrl);
 
   final Map<String, List<String>> _categories = {
     'All Categories': [],
@@ -50,7 +51,7 @@ class BrowserProvider with ChangeNotifier {
     _isGridView = !_isGridView;
     notifyListeners();
   }
-  
+
   List<String> get breadcrumbs {
     if (_currentUrl.isEmpty) return [];
     try {
@@ -83,7 +84,7 @@ class BrowserProvider with ChangeNotifier {
     item.isSelected = !item.isSelected;
     notifyListeners();
   }
-  
+
   void selectAll(bool select) {
     for (var item in _items) {
       item.isSelected = select;
@@ -124,8 +125,26 @@ class BrowserProvider with ChangeNotifier {
     if (str != null) {
       final List<dynamic> decoded = jsonDecode(str);
       _bookmarks = decoded.map((e) => Map<String, String>.from(e)).toList();
-      notifyListeners();
     }
+
+    // Add defaults if missing
+    final defaultBookmarks = [
+      {'url': 'http://new.circleftp.net/', 'name': 'Circle FTP'},
+      {'url': 'http://172.16.50.4/', 'name': 'Local FTP'},
+    ];
+
+    bool added = false;
+    for (var db in defaultBookmarks) {
+      if (!_bookmarks.any((b) => b['url'] == db['url'])) {
+        _bookmarks.add(db);
+        added = true;
+      }
+    }
+
+    if (added) {
+      await _saveBookmarks();
+    }
+    notifyListeners();
   }
 
   Future<void> _saveBookmarks() async {
@@ -155,7 +174,7 @@ class BrowserProvider with ChangeNotifier {
     _saveBookmarks();
     notifyListeners();
   }
-  
+
   void removeBookmark(String url) {
     _bookmarks.removeWhere((b) => b['url'] == url);
     _saveBookmarks();
@@ -194,10 +213,10 @@ class BrowserProvider with ChangeNotifier {
     try {
       final dio = DioClient().dio;
       final response = await dio.get(url);
-      
+
       final htmlStr = response.data.toString();
       _items = await HtmlParserService.parseApacheDirectoryAsync(htmlStr, url);
-      
+
       _currentUrl = url;
       if (addToHistory) {
         if (_history.isEmpty || _history.last != url) {
@@ -205,10 +224,13 @@ class BrowserProvider with ChangeNotifier {
         }
       }
     } on DioException catch (e) {
-      if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
-        _errorMessage = 'Connection Timed Out. Please check your proxy or network.';
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        _errorMessage =
+            'Connection Timed Out. Please check your proxy or network.';
       } else {
-        _errorMessage = 'Network Error: ${e.message ?? e.error?.toString() ?? "Unknown connection issue."}';
+        _errorMessage =
+            'Network Error: ${e.message ?? e.error?.toString() ?? "Unknown connection issue."}';
       }
       _items = [];
     } catch (e) {
@@ -225,7 +247,9 @@ class BrowserProvider with ChangeNotifier {
 
     // Apply Search Query
     if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((i) => i.name.toLowerCase().contains(_searchQuery)).toList();
+      filtered = filtered
+          .where((i) => i.name.toLowerCase().contains(_searchQuery))
+          .toList();
     }
 
     // Apply Category keywords

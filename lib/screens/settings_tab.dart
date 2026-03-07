@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'dart:ui';
 import '../providers/app_state.dart';
 import '../services/github_updater.dart';
+import 'security_setup_screen.dart';
 
 class SettingsTab extends StatelessWidget {
   const SettingsTab({super.key});
@@ -26,24 +27,32 @@ class SettingsTab extends StatelessWidget {
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Theme.of(context).colorScheme.surface,
-                    Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest
-                        .withValues(alpha: 0.8),
-                  ],
-                ),
+                color: appState.trueAmoledDark &&
+                        Theme.of(context).brightness == Brightness.dark
+                    ? Colors.black
+                    : null,
+                gradient: appState.trueAmoledDark &&
+                        Theme.of(context).brightness == Brightness.dark
+                    ? null
+                    : LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Theme.of(context).colorScheme.surface,
+                          Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest
+                              .withValues(alpha: 0.8),
+                        ],
+                      ),
               ),
             ),
           ),
           ListView(
+            physics: const BouncingScrollPhysics(),
             padding: EdgeInsets.only(
               top: MediaQuery.of(context).padding.top + kToolbarHeight + 16,
-              bottom: 100,
+              bottom: 120,
             ),
             children: [
               _buildGlassSection(
@@ -175,11 +184,60 @@ class SettingsTab extends StatelessWidget {
                 context,
                 'SECURITY & PRIVACY',
                 [
-                  _buildGlassSwitchTile(
-                    title: 'Require Fingerprint to Open App',
-                    value: appState.requireBiometrics,
-                    onChanged: (val) => appState.setRequireBiometrics(val),
+                  _buildGlassTile(
+                    title: const Text('App Lock Type'),
+                    subtitle: Text(appState.lockType == 'none'
+                        ? 'Disabled'
+                        : appState.lockType == 'device'
+                            ? 'Device (Fingerprint/PIN/Pattern)'
+                            : 'Custom App PIN'),
+                    trailing: DropdownButton<String>(
+                      value: appState.lockType,
+                      underline: const SizedBox(),
+                      items: const [
+                        DropdownMenuItem(value: 'none', child: Text('None')),
+                        DropdownMenuItem(
+                            value: 'device', child: Text('Device')),
+                        DropdownMenuItem(
+                            value: 'custom', child: Text('Custom PIN')),
+                      ],
+                      onChanged: (val) {
+                        if (val == 'custom' && appState.customPinHash.isEmpty) {
+                          _showSecuritySetup(context);
+                        } else {
+                          if (val != null) appState.setLockType(val);
+                        }
+                      },
+                    ),
                   ),
+                  _buildGlassTile(
+                    title: const Text('Inactivity Auto-Lock'),
+                    subtitle: Text(appState.autoLockSeconds == 0
+                        ? 'Immediate'
+                        : appState.autoLockSeconds == 30
+                            ? '30 Seconds'
+                            : '${appState.autoLockSeconds ~/ 60} Minute(s)'),
+                    trailing: DropdownButton<int>(
+                      value: appState.autoLockSeconds,
+                      underline: const SizedBox(),
+                      items: const [
+                        DropdownMenuItem(value: 0, child: Text('Immediate')),
+                        DropdownMenuItem(value: 30, child: Text('30s')),
+                        DropdownMenuItem(value: 60, child: Text('1m')),
+                        DropdownMenuItem(value: 120, child: Text('2m')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) appState.setAutoLockSeconds(val);
+                      },
+                    ),
+                  ),
+                  if (appState.lockType == 'custom')
+                    _buildGlassTile(
+                      title: const Text('Configure Custom PIN'),
+                      subtitle: const Text('Change PIN or security question'),
+                      leading: const Icon(Icons.security),
+                      onTap: () => _showSecuritySetup(context),
+                    ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -366,5 +424,12 @@ class SettingsTab extends StatelessWidget {
         );
       }
     }
+  }
+
+  void _showSecuritySetup(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SecuritySetupScreen()),
+    );
   }
 }

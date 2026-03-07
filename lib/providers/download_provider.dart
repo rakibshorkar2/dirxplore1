@@ -530,12 +530,19 @@ class DownloadProvider with ChangeNotifier {
                 progressPercent =
                     ((item.downloadedBytes / item.totalBytes) * 100).toInt();
               }
+              final etaSec = item.etaSeconds;
+              final etaStr = etaSec > 0 ? _formatDuration(etaSec) : "";
+              final sizeStr =
+                  '${_formatSize(item.downloadedBytes)} / ${_formatSize(item.totalBytes)}';
+
               _channel.invokeMethod('updateProgress', {
                 'id': 1001,
                 'progress': progressPercent,
                 'speed':
                     '${(item.speedBytesPerSec / 1024 / 1024).toStringAsFixed(2)} MB/s',
                 'filename': item.fileName,
+                'eta': etaStr,
+                'size': sizeStr,
               }).catchError((_) {});
 
               lastUpdate = now;
@@ -569,6 +576,12 @@ class DownloadProvider with ChangeNotifier {
       item.downloadedBytes = item.totalBytes;
       _cancelTokens.remove(item.id);
       _saveQueue();
+
+      _channel.invokeMethod('stopForegroundService', {
+        'id': 1001,
+        'filename': item.fileName,
+        'success': true,
+      }).catchError((_) {});
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
         // Paused intentionally, status already updated
@@ -588,6 +601,12 @@ class DownloadProvider with ChangeNotifier {
         } else {
           item.status = DownloadStatus.error;
           item.errorMessage = e.message;
+          _channel.invokeMethod('stopForegroundService', {
+            'id': 1001,
+            'filename': item.fileName,
+            'error': true,
+            'error_msg': e.message,
+          }).catchError((_) {});
         }
         _cancelTokens.remove(item.id);
         _saveQueue();
@@ -597,6 +616,12 @@ class DownloadProvider with ChangeNotifier {
       item.errorMessage = e.toString();
       _cancelTokens.remove(item.id);
       _saveQueue();
+      _channel.invokeMethod('stopForegroundService', {
+        'id': 1001,
+        'filename': item.fileName,
+        'error': true,
+        'error_msg': e.toString(),
+      }).catchError((_) {});
     } finally {
       if (_activeCount > 0) {
         _stopForegroundIfNoActive();
@@ -709,4 +734,20 @@ class ProxySink implements Sink<Digest> {
   void add(Digest data) => digest = data;
   @override
   void close() {}
+}
+
+String _formatDuration(int seconds) {
+  if (seconds < 60) return '${seconds}s';
+  if (seconds < 3600) return '${seconds ~/ 60}m ${seconds % 60}s';
+  return '${seconds ~/ 3600}h ${(seconds % 3600) ~/ 60}m';
+}
+
+String _formatSize(int bytes) {
+  if (bytes < 0) return "Unknown";
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
 }

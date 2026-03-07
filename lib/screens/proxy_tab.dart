@@ -5,6 +5,7 @@ import 'package:yaml/yaml.dart';
 import 'dart:io';
 import 'dart:ui';
 import '../providers/proxy_provider.dart';
+import '../providers/app_state.dart';
 import '../models/proxy_model.dart';
 
 class ProxyTab extends StatelessWidget {
@@ -31,6 +32,11 @@ class ProxyTab extends StatelessWidget {
             onPressed: () => _importYamlProxies(context),
           ),
           IconButton(
+            icon: const Icon(Icons.playlist_add),
+            tooltip: 'Bulk Import',
+            onPressed: () => _showBulkImportDialog(context),
+          ),
+          IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'Add Proxy',
             onPressed: () => _showAddProxyDialog(context),
@@ -42,31 +48,41 @@ class ProxyTab extends StatelessWidget {
         children: [
           // Background gradient
           Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Theme.of(context).colorScheme.surface,
-                    Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest
-                        .withValues(alpha: 0.8),
-                  ],
-                ),
-              ),
+            child: Consumer<AppState>(
+              builder: (context, appState, child) {
+                final isAmoled = appState.trueAmoledDark &&
+                    Theme.of(context).brightness == Brightness.dark;
+                return Container(
+                  decoration: BoxDecoration(
+                    color: isAmoled ? Colors.black : null,
+                    gradient: isAmoled
+                        ? null
+                        : LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Theme.of(context).colorScheme.surface,
+                              Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.8),
+                            ],
+                          ),
+                  ),
+                );
+              },
             ),
           ),
           proxyProvider.proxies.isEmpty
               ? const Center(
                   child: Text('No proxies added. Traffic goes DIRECT.'))
               : ListView.builder(
+                  physics: const BouncingScrollPhysics(),
                   padding: EdgeInsets.only(
                     top: MediaQuery.of(context).padding.top +
                         kToolbarHeight +
                         16,
-                    bottom: 100,
+                    bottom: 120,
                   ),
                   itemCount: proxyProvider.proxies.length,
                   itemBuilder: (context, index) {
@@ -74,91 +90,85 @@ class ProxyTab extends StatelessWidget {
                     return Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                          child: Container(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
                               color: Theme.of(context)
                                   .colorScheme
-                                  .surface
-                                  .withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outlineVariant
-                                    .withValues(alpha: 0.3),
-                              ),
+                                  .primaryContainer
+                                  .withValues(alpha: 0.3),
+                              shape: BoxShape.circle,
                             ),
-                            child: ListTile(
-                              leading: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .primaryContainer
-                                      .withValues(alpha: 0.3),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.security, size: 20),
+                            child: const Icon(Icons.security, size: 20),
+                          ),
+                          title: Text(
+                            proxy.displayUri,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            proxy.latencyMs == null
+                                ? 'Not tested'
+                                : (proxy.latencyMs == -1
+                                    ? 'Connection Failed'
+                                    : 'Latency: ${proxy.latencyMs}ms'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: proxy.latencyMs == -1
+                                  ? Colors.red
+                                  : (proxy.latencyMs != null &&
+                                          proxy.latencyMs! < 500
+                                      ? Colors.green
+                                      : Colors.orange),
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Switch(
+                                value: proxy.isActive,
+                                onChanged: (val) =>
+                                    proxyProvider.toggleProxy(proxy.id, val),
+                                activeThumbColor:
+                                    Theme.of(context).colorScheme.primary,
                               ),
-                              title: Text(
-                                proxy.displayUri,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                              subtitle: Text(
-                                proxy.latencyMs == null
-                                    ? 'Not tested'
-                                    : (proxy.latencyMs == -1
-                                        ? 'Connection Failed'
-                                        : 'Latency: ${proxy.latencyMs}ms'),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: proxy.latencyMs == -1
-                                      ? Colors.red
-                                      : (proxy.latencyMs != null &&
-                                              proxy.latencyMs! < 500
-                                          ? Colors.green
-                                          : Colors.orange),
-                                ),
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Switch(
-                                    value: proxy.isActive,
-                                    onChanged: (val) => proxyProvider
-                                        .toggleProxy(proxy.id, val),
-                                    activeThumbColor:
-                                        Theme.of(context).colorScheme.primary,
+                              PopupMenuButton(
+                                icon: const Icon(Icons.more_vert, size: 20),
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'test',
+                                    child: Text('Test Ping'),
                                   ),
-                                  PopupMenuButton(
-                                    icon: const Icon(Icons.more_vert, size: 20),
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(
-                                        value: 'test',
-                                        child: Text('Test Ping'),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'delete',
-                                        child: Text('Delete'),
-                                      ),
-                                    ],
-                                    onSelected: (val) {
-                                      if (val == 'test') {
-                                        proxyProvider.testProxyLatency(proxy);
-                                      }
-                                      if (val == 'delete') {
-                                        proxyProvider.deleteProxy(proxy.id);
-                                      }
-                                    },
-                                  )
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
                                 ],
-                              ),
-                            ),
+                                onSelected: (val) {
+                                  if (val == 'test') {
+                                    proxyProvider.testProxyLatency(proxy);
+                                  }
+                                  if (val == 'delete') {
+                                    proxyProvider.deleteProxy(proxy.id);
+                                  }
+                                },
+                              )
+                            ],
                           ),
                         ),
                       ),
@@ -357,5 +367,69 @@ class ProxyTab extends StatelessWidget {
             .showSnackBar(SnackBar(content: Text('Error parsing YAML: $e')));
       }
     }
+  }
+
+  void _showBulkImportDialog(BuildContext context) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bulk Import Proxies'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Paste one or more proxy URIs (one per line):',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                hintText: 'socks5://host:port\nsocks5://user:pass@host:port',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final text = ctrl.text.trim();
+              if (text.isEmpty) return;
+
+              final lines = text.split('\n');
+              final proxies = <ProxyModel>[];
+              for (var line in lines) {
+                final cleaned = line.trim();
+                if (cleaned.isEmpty) continue;
+                final model = ProxyModel.fromUri(cleaned);
+                if (model != null) {
+                  proxies.add(model);
+                }
+              }
+
+              if (proxies.isNotEmpty) {
+                await context.read<AppProxyProvider>().addProxies(proxies);
+                if (context.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('Imported ${proxies.length} proxies!')),
+                  );
+                }
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
   }
 }
