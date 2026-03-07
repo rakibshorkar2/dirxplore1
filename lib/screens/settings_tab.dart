@@ -307,42 +307,45 @@ class SettingsTab extends StatelessWidget {
 
   Widget _buildGlassSection(
       BuildContext context, String title, List<Widget> children) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 8.0, bottom: 8.0),
-            child: Text(title,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                    fontSize: 12)),
-          ),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-              child: Container(
-                decoration: BoxDecoration(
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0, bottom: 8.0),
+              child: Text(title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                      fontSize: 12)),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .surface
+                    .withValues(alpha: 0.15), // Optimized "Faux Glass"
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
                   color: Theme.of(context)
                       .colorScheme
-                      .surface
-                      .withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .outlineVariant
-                        .withValues(alpha: 0.3),
-                  ),
+                      .outlineVariant
+                      .withValues(alpha: 0.15),
                 ),
-                child: Column(children: children),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    spreadRadius: 0,
+                  ),
+                ],
               ),
+              child: Column(children: children),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
