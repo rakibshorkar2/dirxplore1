@@ -24,7 +24,8 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
   double _brightness = 0.5;
   double _volume = 0.5;
   bool _showOverlay = false;
-  String _overlayType = ''; // 'brightness', 'volume', 'seek', 'speed', 'lock'
+  String _overlayType =
+      ''; // 'brightness', 'volume', 'seek', 'speed', 'lock', 'audio', 'subtitle', 'fit'
   Timer? _overlayTimer;
 
   bool _isLocked = false;
@@ -206,6 +207,118 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
     );
   }
 
+  void _showAudioTrackBottomSheet() {
+    final tracks = player.state.tracks.audio;
+    final current = player.state.track.audio;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Audio Tracks',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+              const Divider(color: Colors.white24),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: tracks.length,
+                  itemBuilder: (context, index) {
+                    final track = tracks[index];
+                    final isSelected = track == current;
+                    return ListTile(
+                      title: Text(
+                        track.title ?? track.language ?? 'Track ${index + 1}',
+                        style: TextStyle(
+                          color: isSelected ? Colors.blue : Colors.white,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check, color: Colors.blue)
+                          : null,
+                      onTap: () {
+                        player.setAudioTrack(track);
+                        Navigator.pop(context);
+                        _showControlOverlay('audio');
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSubtitleTrackBottomSheet() {
+    final tracks = player.state.tracks.subtitle;
+    final current = player.state.track.subtitle;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Subtitles',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+              const Divider(color: Colors.white24),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: tracks.length,
+                  itemBuilder: (context, index) {
+                    final track = tracks[index];
+                    final isSelected = track == current;
+                    return ListTile(
+                      title: Text(
+                        track.title ??
+                            track.language ??
+                            (index == 0 ? 'None' : 'Subtitle $index'),
+                        style: TextStyle(
+                          color: isSelected ? Colors.blue : Colors.white,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check, color: Colors.blue)
+                          : null,
+                      onTap: () {
+                        player.setSubtitleTrack(track);
+                        Navigator.pop(context);
+                        _showControlOverlay('subtitle');
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
@@ -279,6 +392,16 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold),
               ),
+            ),
+            IconButton(
+              onPressed: _showAudioTrackBottomSheet,
+              icon: const Icon(Icons.audiotrack, color: Colors.white),
+              tooltip: 'Audio Tracks',
+            ),
+            IconButton(
+              onPressed: _showSubtitleTrackBottomSheet,
+              icon: const Icon(Icons.subtitles, color: Colors.white),
+              tooltip: 'Subtitles',
             ),
             IconButton(
               onPressed: _toggleLock,
@@ -383,6 +506,12 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
       case 'fit':
         icon = Icons.aspect_ratio;
         break;
+      case 'audio':
+        icon = Icons.audiotrack;
+        break;
+      case 'subtitle':
+        icon = Icons.subtitles;
+        break;
       default:
         icon = Icons.info;
     }
@@ -430,6 +559,18 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
       return Text(
         mode,
         style: const TextStyle(
+            color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+      );
+    } else if (_overlayType == 'audio') {
+      return const Text(
+        'Audio Track Changed',
+        style: TextStyle(
+            color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+      );
+    } else if (_overlayType == 'subtitle') {
+      return const Text(
+        'Subtitle Track Changed',
+        style: TextStyle(
             color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
       );
     }

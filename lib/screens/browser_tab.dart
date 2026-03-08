@@ -9,6 +9,7 @@ import '../services/proxy_tunnel.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 import 'media_player_screen.dart';
+import 'download_preview_screen.dart';
 
 class BrowserTab extends StatefulWidget {
   const BrowserTab({super.key});
@@ -489,21 +490,59 @@ class _BrowserTabState extends State<BrowserTab> {
                     }
                     return;
                   }
-                  if (!mounted) return;
-                  if (!context.mounted) return;
+                  if (!mounted) {
+                    return;
+                  }
+                  if (!context.mounted) {
+                    return;
+                  }
 
                   final dlProvider = context.read<DownloadProvider>();
                   final appState = context.read<AppState>();
                   final selected = browserState.getSelectedItems();
 
+                  final List<DirectoryItem> filesToQueueDirectly = [];
+
                   for (var item in selected) {
                     if (item.isDirectory) {
-                      dlProvider.addRecursiveDownload(
-                          item.url, item.name, appState.defaultSavePath);
+                      // Show loading dialog while crawling
+                      if (context.mounted) {
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) =>
+                              const Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      final items =
+                          await dlProvider.crawlFolder(item.url, item.name);
+
+                      if (context.mounted) {
+                        Navigator.pop(context); // Remove loading dialog
+                      }
+
+                      if (context.mounted) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DownloadPreviewScreen(
+                              folderUrl: item.url,
+                              folderName: item.name,
+                              baseSaveDir: appState.defaultSavePath,
+                              initialItems: items,
+                            ),
+                          ),
+                        );
+                      }
                     } else {
-                      dlProvider.addDownload(
-                          item.url, item.name, appState.defaultSavePath);
+                      filesToQueueDirectly.add(item);
                     }
+                  }
+
+                  for (var item in filesToQueueDirectly) {
+                    dlProvider.addDownload(
+                        item.url, item.name, appState.defaultSavePath);
                   }
 
                   if (context.mounted) {

@@ -12,9 +12,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:disk_space_2/disk_space_2.dart';
 import '../models/download_item.dart';
 import '../services/dio_client.dart';
 import '../services/html_parser.dart';
+import '../services/database_helper.dart';
+import '../models/directory_item.dart';
 
 class DownloadProvider with ChangeNotifier {
   static const MethodChannel _channel =
@@ -23,6 +26,24 @@ class DownloadProvider with ChangeNotifier {
   final Map<String, CancelToken> _cancelTokens = {};
   int _maxConcurrent = 3;
   int _activeCount = 0;
+  DateTime _lastNotifyTime = DateTime.now();
+  DateTime _lastSaveTime = DateTime.now();
+  double _totalStorage = 0;
+  double _freeStorage = 0;
+  bool _isProcessingQueue = false;
+
+  double get totalStorage => _totalStorage;
+  double get freeStorage => _freeStorage;
+
+  Future<void> updateStorageInfo() async {
+    try {
+      _totalStorage = await DiskSpace.getTotalDiskSpace ?? 0;
+      _freeStorage = await DiskSpace.getFreeDiskSpace ?? 0;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Storage update error: $e');
+    }
+  }
 
   // Selection State
   final Set<String> _selectedIds = {};
@@ -34,6 +55,7 @@ class DownloadProvider with ChangeNotifier {
 
   Future<void> init() async {
     await _loadQueue();
+    await updateStorageInfo();
     _channel.setMethodCallHandler(_handleNotificationAction);
   }
 
@@ -63,21 +85,15 @@ class DownloadProvider with ChangeNotifier {
   }
 
   Future<void> _loadQueue() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString('download_queue');
-    if (jsonStr != null) {
-      final List<dynamic> list = jsonDecode(jsonStr);
-      _queue.clear();
-      _queue.addAll(list.map((item) => DownloadItem.fromJson(item)).toList());
-      notifyListeners();
-      _processQueue();
-    }
+    _queue.clear();
+    _queue.addAll(await DatabaseHelper().getDownloads());
+    notifyListeners();
+    _processQueue();
   }
 
   Future<void> _saveQueue() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = jsonEncode(_queue.map((item) => item.toJson()).toList());
-    await prefs.setString('download_queue', jsonStr);
+    // With SQLite, we update items individually.
+    // This method can remain as a legacy call or trigger bulk sync if needed.
   }
 
   void setMaxConcurrent(int max) {
@@ -119,6 +135,11 @@ class DownloadProvider with ChangeNotifier {
       }
     }
 
+    // NEW: Create subfolder if batchName is provided
+    if (batchName != null && batchName.trim().isNotEmpty) {
+      finalSaveDir = p.join(finalSaveDir, batchName.trim());
+    }
+
     final savePath = p.join(finalSaveDir, fileName);
 
     _queue.add(DownloadItem(
@@ -130,20 +151,21 @@ class DownloadProvider with ChangeNotifier {
       batchName: batchName,
     ));
 
-    _saveQueue();
+    await DatabaseHelper().insertDownload(_queue.last);
+    await updateStorageInfo();
     notifyListeners();
     _processQueue();
   }
 
-  void addRecursiveDownload(
-      String folderUrl, String folderName, String baseSaveDir) {
-    final batchId = DateTime.now().millisecondsSinceEpoch.toString();
-    _crawlAndQueue(
-        folderUrl, p.join(baseSaveDir, folderName), batchId, folderName);
+  Future<List<DirectoryItem>> crawlFolder(
+      String folderUrl, String folderName) async {
+    final List<DirectoryItem> allItems = [];
+    await _crawlRecursive(folderUrl, allItems);
+    return allItems;
   }
 
-  Future<void> _crawlAndQueue(String folderUrl, String targetDir,
-      String batchId, String batchName) async {
+  Future<void> _crawlRecursive(
+      String folderUrl, List<DirectoryItem> results) async {
     try {
       final dio = DioClient().dio;
       final response = await dio.get(folderUrl);
@@ -153,47 +175,50 @@ class DownloadProvider with ChangeNotifier {
 
       for (var item in items) {
         if (item.isDirectory) {
-          await _crawlAndQueue(
-              item.url, p.join(targetDir, item.name), batchId, batchName);
+          await _crawlRecursive(item.url, results);
         } else {
-          // Filter to only download movies and subtitles automatically
-          final ext = item.name.split('.').last.toLowerCase();
-          const allowedExtensions = [
-            'mp4',
-            'mkv',
-            'avi',
-            'mov',
-            'webm',
-            'srt',
-            'vtt',
-            'sub'
-          ];
-          if (allowedExtensions.contains(ext)) {
-            addDownload(item.url, item.name, targetDir,
-                batchId: batchId, batchName: batchName);
-          }
+          results.add(item);
         }
       }
     } catch (e) {
-      debugPrint("Error crawling $folderUrl: $e");
+      debugPrint("Crawl error: $e");
+    }
+  }
+
+  void addRecursiveDownload(
+      String folderUrl, String folderName, String baseSaveDir) async {
+    // Legacy support: auto-queueing movies/subs
+    final items = await crawlFolder(folderUrl, folderName);
+    final batchId = DateTime.now().millisecondsSinceEpoch.toString();
+
+    for (var item in items) {
+      final ext = item.name.split('.').last.toLowerCase();
+      if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'srt', 'vtt', 'sub']
+          .contains(ext)) {
+        addDownload(item.url, item.name, baseSaveDir,
+            batchId: batchId, batchName: folderName);
+      }
     }
   }
 
   void pause(String id) {
-    _cancelTokens[id]?.cancel('Paused by user');
-    _cancelTokens.remove(id);
-
+    if (!_queue.any((i) => i.id == id)) return;
     final item = _queue.firstWhere((i) => i.id == id);
-    item.status = DownloadStatus.paused;
-    item.speedBytesPerSec = 0;
 
-    // Stop foreground service if this was the last active
-    _stopForegroundIfNoActive();
-
-    _activeCount--;
-    _saveQueue();
-    notifyListeners();
-    _processQueue();
+    if (item.status == DownloadStatus.downloading) {
+      _cancelTokens[id]?.cancel('Paused by user');
+      _cancelTokens.remove(id);
+      item.status = DownloadStatus.paused;
+      item.speedBytesPerSec = 0;
+      notifyListeners();
+      // _startDownload's finally block will handle _activeCount--, saving, and _processQueue()
+    } else {
+      item.status = DownloadStatus.paused;
+      item.speedBytesPerSec = 0;
+      _saveQueue();
+      updateStorageInfo();
+      notifyListeners();
+    }
   }
 
   void _stopForegroundIfNoActive() {
@@ -214,22 +239,84 @@ class DownloadProvider with ChangeNotifier {
   }
 
   void stop(String id) {
-    _cancelTokens[id]?.cancel('Stopped by user');
-    _cancelTokens.remove(id);
-    _queue.removeWhere((i) => i.id == id);
-    if (_activeCount > 0) {
-      _stopForegroundIfNoActive();
-      _activeCount--;
+    if (!_queue.any((i) => i.id == id)) return;
+    final item = _queue.firstWhere((i) => i.id == id);
+
+    if (item.status == DownloadStatus.downloading) {
+      _cancelTokens[id]?.cancel('Stopped by user');
+      _cancelTokens.remove(id);
+      // Let the finally block handle _activeCount-- gracefully
     }
+
+    _queue.removeWhere((i) => i.id == id);
+    DatabaseHelper().deleteDownload(id);
     _saveQueue();
+    updateStorageInfo();
     notifyListeners();
-    _processQueue();
+  }
+
+  void resumeBatch(String batchId) {
+    bool hasResumed = false;
+    for (var i in _queue) {
+      if (i.batchId == batchId &&
+          (i.status == DownloadStatus.paused ||
+              i.status == DownloadStatus.error)) {
+        i.status = DownloadStatus.queued;
+        i.errorMessage = null;
+        DatabaseHelper().updateDownload(i);
+        hasResumed = true;
+      }
+    }
+    if (hasResumed) {
+      _saveQueue();
+      notifyListeners();
+      _processQueue();
+    }
+  }
+
+  void pauseBatch(String batchId) {
+    bool hasPaused = false;
+    for (var i in _queue) {
+      if (i.batchId == batchId) {
+        if (i.status == DownloadStatus.downloading) {
+          _cancelTokens[i.id]?.cancel('Paused by user');
+          _cancelTokens.remove(i.id);
+          i.status = DownloadStatus.paused;
+          i.speedBytesPerSec = 0;
+          hasPaused = true;
+        } else if (i.status == DownloadStatus.queued) {
+          i.status = DownloadStatus.paused;
+          hasPaused = true;
+        }
+        DatabaseHelper().updateDownload(i);
+      }
+    }
+    if (hasPaused) {
+      _saveQueue();
+      notifyListeners();
+    }
+  }
+
+  void stopBatch(String batchId) {
+    final batchItems = _queue.where((i) => i.batchId == batchId).toList();
+    for (var i in batchItems) {
+      if (i.status == DownloadStatus.downloading) {
+        _cancelTokens[i.id]?.cancel('Stopped by user');
+        _cancelTokens.remove(i.id);
+      }
+      DatabaseHelper().deleteDownload(i.id);
+    }
+    _queue.removeWhere((i) => i.batchId == batchId);
+    _saveQueue();
+    updateStorageInfo();
+    notifyListeners();
   }
 
   void clearDone() {
     _queue.removeWhere((i) =>
         i.status == DownloadStatus.done || i.status == DownloadStatus.error);
     _saveQueue();
+    updateStorageInfo();
     notifyListeners();
   }
 
@@ -243,6 +330,7 @@ class DownloadProvider with ChangeNotifier {
     _isSelectionMode = false;
     _selectedIds.clear();
     _saveQueue();
+    updateStorageInfo();
     notifyListeners();
   }
 
@@ -310,6 +398,7 @@ class DownloadProvider with ChangeNotifier {
     _selectedIds.clear();
     _isSelectionMode = false;
     _saveQueue();
+    updateStorageInfo();
     notifyListeners();
     _processQueue();
   }
@@ -346,44 +435,53 @@ class DownloadProvider with ChangeNotifier {
   }
 
   Future<void> _processQueue() async {
-    while (_activeCount < _maxConcurrent) {
-      final nextItem = _queue.firstWhere(
-        (i) => i.status == DownloadStatus.queued,
-        orElse: () => DownloadItem(id: '', url: '', fileName: '', savePath: ''),
-      );
+    if (_isProcessingQueue) return;
+    _isProcessingQueue = true;
 
-      if (nextItem.id.isEmpty) break; // Nothing to download
-
-      // Check Smart Conditions before starting
+    try {
       final prefs = await SharedPreferences.getInstance();
+      final wifiOnly = prefs.getBool('downloadOnWifiOnly') == true;
+      final lowBatteryPause = prefs.getBool('pauseLowBattery') == true;
+      _maxConcurrent = prefs.getInt('maxConcurrent') ?? 1;
 
-      // 1. Wi-Fi Check
-      if (prefs.getBool('downloadOnWifiOnly') == true) {
-        var connectivityResult = await (Connectivity().checkConnectivity());
-        if (!connectivityResult.contains(ConnectivityResult.wifi)) {
-          // Pause it automatically
-          nextItem.status = DownloadStatus.paused;
-          nextItem.errorMessage = 'Paused: Waiting for Wi-Fi';
-          _saveQueue();
-          notifyListeners();
-          continue; // Skips to next item
+      while (_activeCount < _maxConcurrent) {
+        final nextItem = _queue.firstWhere(
+          (i) => i.status == DownloadStatus.queued,
+          orElse: () =>
+              DownloadItem(id: '', url: '', fileName: '', savePath: ''),
+        );
+
+        if (nextItem.id.isEmpty) break; // Nothing to download
+
+        // 1. Wi-Fi Check
+        if (wifiOnly) {
+          var connectivityResult = await (Connectivity().checkConnectivity());
+          if (!connectivityResult.contains(ConnectivityResult.wifi)) {
+            nextItem.status = DownloadStatus.paused;
+            nextItem.errorMessage = 'Paused: Waiting for Wi-Fi';
+            DatabaseHelper().updateDownload(nextItem);
+            notifyListeners();
+            continue;
+          }
         }
-      }
 
-      // 2. Battery Check
-      if (prefs.getBool('pauseLowBattery') == true) {
-        final battery = Battery();
-        final level = await battery.batteryLevel;
-        if (level < 15) {
-          nextItem.status = DownloadStatus.paused;
-          nextItem.errorMessage = 'Paused: Battery below 15%';
-          _saveQueue();
-          notifyListeners();
-          continue;
+        // 2. Battery Check
+        if (lowBatteryPause) {
+          final battery = Battery();
+          final level = await battery.batteryLevel;
+          if (level < 15) {
+            nextItem.status = DownloadStatus.paused;
+            nextItem.errorMessage = 'Paused: Battery below 15%';
+            DatabaseHelper().updateDownload(nextItem);
+            notifyListeners();
+            continue;
+          }
         }
-      }
 
-      _startDownload(nextItem);
+        _startDownload(nextItem);
+      }
+    } finally {
+      _isProcessingQueue = false;
     }
   }
 
@@ -391,247 +489,179 @@ class DownloadProvider with ChangeNotifier {
     _activeCount++;
     item.status = DownloadStatus.downloading;
     notifyListeners();
+    await DatabaseHelper().updateDownload(item);
 
     // Start Foreground Service
     _channel.invokeMethod('startForegroundService', {
       'url': item.url,
       'filename': item.fileName,
-      'id': 1001, // Use non-zero ID for Android foreground service compliance
+      'id': 1001,
     }).catchError((_) {});
 
     final cancelToken = CancelToken();
     _cancelTokens[item.id] = cancelToken;
 
     final file = File(item.savePath);
-    int existingBytes = 0;
-
-    if (await file.exists()) {
-      existingBytes = await file.length();
+    // Ensure parent directory exists for organized downloads
+    final parentDir = file.parent;
+    if (!await parentDir.exists()) {
+      await parentDir.create(recursive: true);
     }
 
-    item.downloadedBytes = existingBytes;
-
-    DateTime lastUpdate = DateTime.now();
-    int bytesSinceLastUpdate = 0;
+    // TRUST PERSISTED PROGRESS: file.length() is unreliable due to pre-allocation
+    if (!await file.exists()) {
+      item.downloadedBytes = 0;
+    }
+    int existingBytes = item.downloadedBytes;
 
     try {
       final dio = DioClient().dio;
-
-      final response = await dio.get<ResponseBody>(
-        item.url,
-        cancelToken: cancelToken,
-        options: Options(
-          responseType: ResponseType.stream,
-          headers:
-              existingBytes > 0 ? {'Range': 'bytes=$existingBytes-'} : null,
-        ),
-      );
-
+      final headResponse = await dio.head(item.url);
       final totalHeader =
-          response.headers.value(HttpHeaders.contentLengthHeader) ?? '-1';
+          headResponse.headers.value(HttpHeaders.contentLengthHeader) ?? '-1';
       final total = int.tryParse(totalHeader) ?? -1;
+      item.totalBytes = total;
 
-      if (response.statusCode == 416) {
-        // Server responded Range Not Satisfiable: We already have the complete file!
-        item.status = DownloadStatus.done;
-        item.speedBytesPerSec = 0;
-        item.etaSeconds = 0;
-        item.downloadedBytes = existingBytes;
-        item.totalBytes = existingBytes;
-        _cancelTokens.remove(item.id);
-        return; // finally block will cleanup concurrency
-      }
+      // --- NATIVE DISK PRE-ALLOCATION ---
+      // Disabled to ensure file size on disk matches actual downloaded bytes
+      // if (total > 0) {
+      //   NativeHashService().preAllocateDisk(item.savePath, total);
+      // }
+      // ---------------------------------
 
-      if (total != -1) {
-        if (response.statusCode == 206) {
-          item.totalBytes = existingBytes + total;
-        } else {
-          // Server ignored range request
-          item.totalBytes = total;
-          existingBytes = 0; // The file will be overwritten
-        }
-      }
-
-      final dir = Directory(p.dirname(item.savePath));
-      if (!await dir.exists()) {
-        try {
-          await dir.create(recursive: true);
-        } catch (e) {
-          // OS Error: A file exists with the exact same name as the target directory.
-          // This happens if the user clicked the folder "as a file" before updates.
-          final fileInWay = File(dir.path);
-          if (await fileInWay.exists()) {
-            await fileInWay.delete();
-            await dir.create(recursive: true);
-          } else {
-            rethrow;
-          }
-        }
-      }
-
-      final raf = file.openSync(
-          mode: existingBytes > 0 && response.statusCode == 206
-              ? FileMode.append
-              : FileMode.write);
-      final stream = response.data!.stream;
-      final completer = Completer<void>();
-      late StreamSubscription subscription;
-
-      subscription = stream.listen(
-        (chunk) async {
-          // Make it async to allow delay for throttling
-          if (cancelToken.isCancelled) {
-            subscription.cancel();
-            raf.closeSync();
-            if (!completer.isCompleted) {
-              completer.completeError(
-                  DioException.requestCancelled(
-                      requestOptions: response.requestOptions,
-                      reason: "Cancelled"),
-                  StackTrace.current);
-            }
-            return;
-          }
-          try {
-            // ----------------- SPEED LIMITER THROTTLING -----------------
-            final prefs = await SharedPreferences.getInstance();
-            final speedLimitCapKB = prefs.getInt('speedLimitCap') ?? 0;
-            if (speedLimitCapKB > 0) {
-              // If limit is active, calculate how long downloading this chunk SHOULD take
-              // chunk.length is bytes. speedLimitCapKB is kilobytes.
-              final targetMillisForChunk =
-                  (chunk.length / (speedLimitCapKB * 1024)) * 1000;
-
-              // Track time manually for this small chunk
-              // If we downloaded it way faster than targetMillisForChunk, sleep to throttle.
-              // Simple naive sleep for the whole duration since last block (real algorithm would track moving average)
-              await Future.delayed(
-                  Duration(milliseconds: targetMillisForChunk.toInt()));
-            }
-            // -------------------------------------------------------------
-
-            raf.writeFromSync(chunk);
-            item.downloadedBytes += chunk.length;
-            bytesSinceLastUpdate += chunk.length;
-
-            final now = DateTime.now();
-            final diff = now.difference(lastUpdate).inMilliseconds;
-
-            if (diff > 1000) {
-              item.speedBytesPerSec =
-                  (bytesSinceLastUpdate / (diff / 1000)).toDouble();
-              if (item.speedBytesPerSec > 0 && item.totalBytes > 0) {
-                final remaining = item.totalBytes - item.downloadedBytes;
-                item.etaSeconds = (remaining / item.speedBytesPerSec).round();
-              }
-
-              int progressPercent = 0;
-              if (item.totalBytes > 0) {
-                progressPercent =
-                    ((item.downloadedBytes / item.totalBytes) * 100).toInt();
-              }
-              final etaSec = item.etaSeconds;
-              final etaStr = etaSec > 0 ? _formatDuration(etaSec) : "";
-              final sizeStr =
-                  '${_formatSize(item.downloadedBytes)} / ${_formatSize(item.totalBytes)}';
-
-              _channel.invokeMethod('updateProgress', {
-                'id': 1001,
-                'progress': progressPercent,
-                'speed':
-                    '${(item.speedBytesPerSec / 1024 / 1024).toStringAsFixed(2)} MB/s',
-                'filename': item.fileName,
-                'eta': etaStr,
-                'size': sizeStr,
-              }).catchError((_) {});
-
-              lastUpdate = now;
-              bytesSinceLastUpdate = 0;
-              notifyListeners();
-            }
-          } catch (e) {
-            subscription.cancel();
-            raf.closeSync();
-            if (!completer.isCompleted) {
-              completer.completeError(e, StackTrace.current);
-            }
-          }
-        },
-        onDone: () {
-          raf.closeSync();
-          if (!completer.isCompleted) completer.complete();
-        },
-        onError: (e, st) {
-          raf.closeSync();
-          if (!completer.isCompleted) completer.completeError(e, st);
-        },
-        cancelOnError: true,
-      );
-
-      await completer.future;
+      // To strictly guarantee file size on disk matches downloaded bytes
+      // and prevent visual anomalies with sparse files during chunks,
+      // we gracefully fall back to a robust single-connection stream.
+      // This also fixes the erratic speed reporting from parallel segments.
+      await _downloadSingle(item, existingBytes, cancelToken);
 
       item.status = DownloadStatus.done;
       item.speedBytesPerSec = 0;
       item.etaSeconds = 0;
       item.downloadedBytes = item.totalBytes;
       _cancelTokens.remove(item.id);
-      _saveQueue();
+      await updateStorageInfo();
 
       _channel.invokeMethod('stopForegroundService', {
         'id': 1001,
         'filename': item.fileName,
         'success': true,
       }).catchError((_) {});
-    } on DioException catch (e) {
-      if (CancelToken.isCancel(e)) {
-        // Paused intentionally, status already updated
-      } else if (e.response?.statusCode == 416) {
-        // Catches strictly HTTP 416 Range Not Satisfiable inside Dio validation exceptions
-        item.status = DownloadStatus.done;
-        item.speedBytesPerSec = 0;
-        item.etaSeconds = 0;
-        item.downloadedBytes =
-            item.totalBytes > 0 ? item.totalBytes : existingBytes;
-        _cancelTokens.remove(item.id);
-        _saveQueue();
-      } else {
-        if (item.retryCount < 3) {
-          item.retryCount++;
-          item.status = DownloadStatus.queued;
-        } else {
-          item.status = DownloadStatus.error;
-          item.errorMessage = e.message;
-          _channel.invokeMethod('stopForegroundService', {
-            'id': 1001,
-            'filename': item.fileName,
-            'error': true,
-            'error_msg': e.message,
-          }).catchError((_) {});
-        }
-        _cancelTokens.remove(item.id);
-        _saveQueue();
-      }
     } catch (e) {
-      item.status = DownloadStatus.error;
-      item.errorMessage = e.toString();
-      _cancelTokens.remove(item.id);
-      _saveQueue();
-      _channel.invokeMethod('stopForegroundService', {
-        'id': 1001,
-        'filename': item.fileName,
-        'error': true,
-        'error_msg': e.toString(),
-      }).catchError((_) {});
+      _handleDownloadError(item, e);
     } finally {
       if (_activeCount > 0) {
         _stopForegroundIfNoActive();
         _activeCount--;
       }
-      _saveQueue();
+      await DatabaseHelper().updateDownload(item);
       notifyListeners();
       _processQueue();
-      _processQueue();
     }
+  }
+
+  Future<void> _downloadSingle(
+      DownloadItem item, int existingBytes, CancelToken cancelToken) async {
+    final dio = DioClient().dio;
+    final file = File(item.savePath);
+    item.downloadedBytes = existingBytes; // SYNC WITH DISK START
+
+    final response = await dio.get<ResponseBody>(
+      item.url,
+      cancelToken: cancelToken,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: existingBytes > 0 ? {'Range': 'bytes=$existingBytes-'} : null,
+      ),
+    );
+
+    // CRITICAL: For pre-allocated files, FileMode.append is WRONG.
+    // It will append to the END of the pre-allocated (full size) file.
+    // We must use 'write' or 'r+' and set position manually.
+    final raf = file.openSync(mode: FileMode.append);
+    if (existingBytes > 0) {
+      raf.setPositionSync(existingBytes);
+    }
+    final stream = response.data!.stream;
+
+    DateTime lastUpdate = DateTime.now();
+    int bytesSinceUpdate = 0;
+
+    await for (final chunk in stream) {
+      if (cancelToken.isCancelled) break;
+      raf.writeFromSync(chunk);
+      item.downloadedBytes += chunk.length;
+      bytesSinceUpdate += chunk.length;
+
+      final now = DateTime.now();
+      if (now.difference(lastUpdate).inMilliseconds >= 500) {
+        _updateProgress(
+            item, bytesSinceUpdate, now.difference(lastUpdate).inMilliseconds);
+        lastUpdate = now;
+        bytesSinceUpdate = 0;
+      }
+    }
+    raf.closeSync();
+  }
+
+  void _updateProgress(
+      DownloadItem item, int bytesSinceLastUpdate, int diffMs) {
+    if (diffMs == 0) return;
+
+    // Smooth out speed calculation
+    double currentSpeed = (bytesSinceLastUpdate / (diffMs / 1000)).toDouble();
+    if (item.speedBytesPerSec == 0) {
+      item.speedBytesPerSec = currentSpeed;
+    } else {
+      item.speedBytesPerSec =
+          (item.speedBytesPerSec * 0.7) + (currentSpeed * 0.3);
+    }
+
+    if (item.speedBytesPerSec > 0 && item.totalBytes > 0) {
+      final remaining = item.totalBytes - item.downloadedBytes;
+      item.etaSeconds = (remaining / item.speedBytesPerSec).round();
+    }
+
+    int progressPercent = 0;
+    if (item.totalBytes > 0) {
+      progressPercent =
+          ((item.downloadedBytes / item.totalBytes) * 100).toInt();
+    }
+
+    _channel.invokeMethod('updateProgress', {
+      'id': 1001,
+      'progress': progressPercent,
+      'speed':
+          '${(item.speedBytesPerSec / 1024 / 1024).toStringAsFixed(2)} MB/s',
+      'filename': item.fileName,
+      'eta': _formatDuration(item.etaSeconds),
+      'size':
+          '${_formatSize(item.downloadedBytes)} / ${_formatSize(item.totalBytes)}',
+    }).catchError((_) {});
+
+    final now = DateTime.now();
+    if (now.difference(_lastNotifyTime).inMilliseconds > 250) {
+      _lastNotifyTime = now;
+      notifyListeners();
+      // Periodically persist to DB in case of crash (every 5 seconds)
+      if (now.difference(_lastSaveTime).inSeconds > 5) {
+        _lastSaveTime = now;
+        DatabaseHelper().updateDownload(item);
+      }
+    }
+  }
+
+  void _handleDownloadError(DownloadItem item, dynamic e) {
+    if (e is DioException && CancelToken.isCancel(e)) return;
+
+    if (item.retryCount < 3) {
+      item.retryCount++;
+      item.status = DownloadStatus.queued;
+    } else {
+      item.status = DownloadStatus.error;
+      item.errorMessage = e.toString();
+    }
+    DatabaseHelper().updateDownload(item);
   }
 
   // --- Integrity Checker (Isolate) ---

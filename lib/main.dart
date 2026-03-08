@@ -251,7 +251,7 @@ class _MainLayoutState extends State<MainLayout> {
               index: _currentIndex,
               children: _tabs,
             ),
-            const FloatingDownloadBubble(),
+            // const FloatingDownloadBubble(), // Removed per user request
             _buildFloatingNavBar(context),
           ],
         ),
