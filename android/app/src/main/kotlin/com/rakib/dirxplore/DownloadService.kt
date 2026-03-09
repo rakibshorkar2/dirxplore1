@@ -133,9 +133,8 @@ class DownloadService : Service() {
         val cancelPendingIntent = PendingIntent.getService(this, 2, cancelIntent, pendingIntentFlags)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSubText("DirXplore")
-            .setContentTitle(title) // Filename
-            .setContentText(if (eta.isNotEmpty()) "$contentText • ETA: $eta" else contentText) 
+            .setContentTitle(title)
+            .setContentText("$contentText" + if (size.isNotEmpty()) " • $size" else "")
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
@@ -144,8 +143,12 @@ class DownloadService : Service() {
             .addAction(actionIcon, actionLabel, actionPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
 
-        if (size.isNotEmpty()) {
-            builder.setSubText(size)
+        if (eta.isNotEmpty() && !paused) {
+            builder.setSubText("ETA: $eta")
+        } else if (paused) {
+            builder.setSubText("Paused")
+        } else {
+            builder.setSubText("Downloading...")
         }
 
         if (progress >= 0) {

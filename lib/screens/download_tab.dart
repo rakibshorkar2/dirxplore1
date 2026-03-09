@@ -348,12 +348,37 @@ class _DownloadTabState extends State<DownloadTab> {
               title: const Text('Remove Batch',
                   style: TextStyle(color: Colors.red)),
               onTap: () {
-                dlProvider.stopBatch(batchId);
-                Navigator.pop(context);
+                Navigator.pop(context); // close bottom sheet
+                _confirmRemoveBatch(context, dlProvider, batchId);
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmRemoveBatch(
+      BuildContext context, DownloadProvider dlProvider, String batchId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Batch?'),
+        content: const Text(
+            'Are you sure you want to remove all items in this batch?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              dlProvider.stopBatch(batchId);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
       ),
     );
   }

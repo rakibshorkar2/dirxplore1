@@ -9,6 +9,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:workmanager/workmanager.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'screens/pin_lock_screen.dart'; // New import
 
 import 'providers/app_state.dart';
@@ -115,7 +116,15 @@ class _OpenDirAppWrapperState extends State<OpenDirAppWrapper> {
     // Initially check wakelock
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _updateWakelock();
+      _requestNotificationPermission();
     });
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    final status = await Permission.notification.status;
+    if (status.isDenied) {
+      await Permission.notification.request();
+    }
   }
 
   void _updateWakelock() {

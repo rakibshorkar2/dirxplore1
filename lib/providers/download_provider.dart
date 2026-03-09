@@ -142,6 +142,10 @@ class DownloadProvider with ChangeNotifier {
 
     final savePath = p.join(finalSaveDir, fileName);
 
+    // Resume logic: if file already exists on disk (even if not in queue),
+    // we want to attempt resuming. Wait, addDownload just adds to queue.
+    // We will handle existing bytes in `_startDownload` where we actually check the disk.
+
     _queue.add(DownloadItem(
       id: id,
       url: url,
@@ -509,8 +513,15 @@ class DownloadProvider with ChangeNotifier {
     }
 
     // TRUST PERSISTED PROGRESS: file.length() is unreliable due to pre-allocation
+    // Actually, if file exists and we are starting, we can check its size to resume.
     if (!await file.exists()) {
       item.downloadedBytes = 0;
+    } else {
+      // If the file exists but downloadedBytes in queue is 0 (e.g., added a new link for an existing file),
+      // we check the file size on disk and use it to resume.
+      if (item.downloadedBytes == 0) {
+        item.downloadedBytes = await file.length();
+      }
     }
     int existingBytes = item.downloadedBytes;
 
@@ -521,6 +532,33 @@ class DownloadProvider with ChangeNotifier {
           headResponse.headers.value(HttpHeaders.contentLengthHeader) ?? '-1';
       final total = int.tryParse(totalHeader) ?? -1;
       item.totalBytes = total;
+
+      // Check if already fully downloaded based on disk size
+      if (existingBytes > 0 && total > 0 && existingBytes >= total) {
+        item.status = DownloadStatus.done;
+        item.speedBytesPerSec = 0;
+        item.etaSeconds = 0;
+        item.downloadedBytes = total;
+        item.totalBytes = total;
+        _cancelTokens.remove(item.id);
+        await updateStorageInfo();
+
+        _channel.invokeMethod('stopForegroundService', {
+          'id': 1001,
+          'filename': item.fileName,
+          'success': true,
+        }).catchError((_) {});
+
+        // Finalize state
+        if (_activeCount > 0) {
+          _stopForegroundIfNoActive();
+          _activeCount--;
+        }
+        await DatabaseHelper().updateDownload(item);
+        notifyListeners();
+        _processQueue();
+        return; // Early return for completed file
+      }
 
       // --- NATIVE DISK PRE-ALLOCATION ---
       // Disabled to ensure file size on disk matches actual downloaded bytes
