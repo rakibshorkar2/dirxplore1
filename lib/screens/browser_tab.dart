@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../providers/browser_provider.dart';
 import '../providers/download_provider.dart';
 import '../providers/app_state.dart';
@@ -137,6 +138,18 @@ class _BrowserTabState extends State<BrowserTab> {
         ),
         actions: [
           IconButton(
+            icon: Icon(
+              browserState.isFallbackMode ? Icons.folder_open : Icons.public,
+              color: browserState.isFallbackMode ? Colors.orange : Colors.blue,
+            ),
+            tooltip: browserState.isFallbackMode
+                ? 'Switch to Native Mode'
+                : 'Switch to WebView Mode',
+            onPressed: () {
+              browserState.toggleFallbackMode();
+            },
+          ),
+          IconButton(
             icon: Icon(browserState.isCurrentBookmarked
                 ? Icons.star
                 : Icons.star_border),
@@ -149,319 +162,345 @@ class _BrowserTabState extends State<BrowserTab> {
             tooltip: 'Bookmarks',
             onPressed: () => _showBookmarksDialog(context, browserState),
           ),
-          IconButton(
-            icon: Icon(browserState.isGridView ? Icons.list : Icons.grid_view),
-            tooltip: 'Toggle View',
-            onPressed: browserState.toggleViewMode,
-          ),
-          IconButton(
-            icon: const Icon(Icons.sort),
-            tooltip: 'Toggle Sort Options',
-            onPressed: browserState.toggleSort,
-          ),
+          if (!browserState.isFallbackMode) ...[
+            IconButton(
+              icon:
+                  Icon(browserState.isGridView ? Icons.list : Icons.grid_view),
+              tooltip: 'Toggle View',
+              onPressed: browserState.toggleViewMode,
+            ),
+            IconButton(
+              icon: const Icon(Icons.sort),
+              tooltip: 'Toggle Sort Options',
+              onPressed: browserState.toggleSort,
+            ),
+          ],
         ],
       ),
-      body: Column(
-        children: [
-          if (browserState.breadcrumbs.isNotEmpty)
-            Container(
-              height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest
-                  .withValues(alpha: 0.5),
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: browserState.breadcrumbs.length,
-                separatorBuilder: (c, i) => const Icon(Icons.chevron_right,
-                    size: 16, color: Colors.grey),
-                itemBuilder: (context, index) {
-                  return InkWell(
-                    onTap: () {
-                      browserState.loadBreadcrumb(index);
-                      _urlCtrl.text = browserState.currentUrl;
-                    },
-                    child: Center(
-                      child: Text(
-                        browserState.breadcrumbs[index],
-                        style: const TextStyle(
-                            color: Colors.blue, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          Expanded(
-            child: browserState.isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : browserState.errorMessage.isNotEmpty
-                    ? Center(
-                        child: Text(browserState.errorMessage,
-                            style: const TextStyle(color: Colors.red)))
-                    : (browserState.isGridView
-                        ? GridView.builder(
-                            padding: const EdgeInsets.all(8.0),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
-                              childAspectRatio: 0.85,
-                              crossAxisSpacing: 8,
-                              mainAxisSpacing: 8,
+      body: browserState.isFallbackMode
+          ? _buildWebView(context, browserState)
+          : Column(
+              children: [
+                if (browserState.breadcrumbs.isNotEmpty)
+                  Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.5),
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: browserState.breadcrumbs.length,
+                      separatorBuilder: (c, i) => const Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: Colors.grey),
+                      itemBuilder: (context, index) {
+                        return InkWell(
+                          onTap: () {
+                            browserState.loadBreadcrumb(index);
+                            _urlCtrl.text = browserState.currentUrl;
+                          },
+                          child: Center(
+                            child: Text(
+                              browserState.breadcrumbs[index],
+                              style: const TextStyle(
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w600),
                             ),
-                            itemCount: browserState.items.length + 1,
-                            itemBuilder: (context, index) {
-                              if (index == browserState.items.length) {
-                                return const SizedBox(height: 100);
-                              }
-                              final item = browserState.items[index];
-                              return InkWell(
-                                onTap: () {
-                                  if (item.isDirectory) {
-                                    _urlCtrl.text = item.url;
-                                    browserState.loadUrl(item.url);
-                                  } else {
-                                    _showItemOptions(context, item);
-                                  }
-                                },
-                                onLongPress: () =>
-                                    browserState.toggleSelection(item),
-                                child: Card(
-                                  color: item.isSelected
-                                      ? Theme.of(context)
-                                          .colorScheme
-                                          .primaryContainer
-                                      : null,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Stack(
-                                        alignment: Alignment.topRight,
-                                        children: [
-                                          Center(
-                                            child: Stack(
-                                              alignment: Alignment.center,
-                                              children: [
-                                                if (!item.isDirectory &&
-                                                    [
-                                                      'jpg',
-                                                      'jpeg',
-                                                      'png',
-                                                      'gif',
-                                                      'webp'
-                                                    ].contains(item.name
-                                                        .split('.')
-                                                        .last
-                                                        .toLowerCase()))
-                                                  Positioned.fill(
-                                                    child: ClipRRect(
-                                                      borderRadius:
-                                                          const BorderRadius
-                                                              .vertical(
-                                                              top: Radius
-                                                                  .circular(
-                                                                      12)),
-                                                      child: Image.network(
-                                                        item.url,
-                                                        fit: BoxFit.cover,
-                                                        errorBuilder:
-                                                            (_, __, ___) =>
-                                                                Icon(
-                                                          _getIconForExtension(
-                                                              item.name),
-                                                          size: 48,
-                                                          color:
-                                                              _getColorForExtension(
-                                                                  item.name),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  )
-                                                else
-                                                  Icon(
-                                                    item.isDirectory
-                                                        ? Icons.folder
-                                                        : _getIconForExtension(
-                                                            item.name),
-                                                    size: 48,
-                                                    color: item.isDirectory
-                                                        ? Colors.amber
-                                                        : _getColorForExtension(
-                                                            item.name),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                          if (item.isSelected)
-                                            const Icon(Icons.check_circle,
-                                                color: Colors.green, size: 18),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      if (!item.isDirectory &&
-                                          _isPlayableMedia(item.name))
-                                        Row(
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                Expanded(
+                  child: browserState.isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : browserState.errorMessage.isNotEmpty
+                          ? Center(
+                              child: Text(browserState.errorMessage,
+                                  style: const TextStyle(color: Colors.red)))
+                          : (browserState.isGridView
+                              ? GridView.builder(
+                                  padding: const EdgeInsets.all(8.0),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 3,
+                                    childAspectRatio: 0.85,
+                                    crossAxisSpacing: 8,
+                                    mainAxisSpacing: 8,
+                                  ),
+                                  itemCount: browserState.items.length + 1,
+                                  itemBuilder: (context, index) {
+                                    if (index == browserState.items.length) {
+                                      return const SizedBox(height: 100);
+                                    }
+                                    final item = browserState.items[index];
+                                    return InkWell(
+                                      onTap: () {
+                                        if (item.isDirectory) {
+                                          _urlCtrl.text = item.url;
+                                          browserState.loadUrl(item.url);
+                                        } else {
+                                          _showItemOptions(context, item);
+                                        }
+                                      },
+                                      onLongPress: () =>
+                                          browserState.toggleSelection(item),
+                                      child: Card(
+                                        color: item.isSelected
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .primaryContainer
+                                            : null,
+                                        child: Column(
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
                                           children: [
-                                            InkWell(
-                                              onTap: () {
+                                            Stack(
+                                              alignment: Alignment.topRight,
+                                              children: [
+                                                Center(
+                                                  child: Stack(
+                                                    alignment: Alignment.center,
+                                                    children: [
+                                                      if (!item.isDirectory &&
+                                                          [
+                                                            'jpg',
+                                                            'jpeg',
+                                                            'png',
+                                                            'gif',
+                                                            'webp'
+                                                          ].contains(item.name
+                                                              .split('.')
+                                                              .last
+                                                              .toLowerCase()))
+                                                        Positioned.fill(
+                                                          child: ClipRRect(
+                                                            borderRadius:
+                                                                const BorderRadius
+                                                                    .vertical(
+                                                                    top: Radius
+                                                                        .circular(
+                                                                            12)),
+                                                            child:
+                                                                Image.network(
+                                                              item.url,
+                                                              fit: BoxFit.cover,
+                                                              errorBuilder: (_,
+                                                                      __,
+                                                                      ___) =>
+                                                                  Icon(
+                                                                _getIconForExtension(
+                                                                    item.name),
+                                                                size: 48,
+                                                                color: _getColorForExtension(
+                                                                    item.name),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        )
+                                                      else
+                                                        Icon(
+                                                          item.isDirectory
+                                                              ? Icons.folder
+                                                              : _getIconForExtension(
+                                                                  item.name),
+                                                          size: 48,
+                                                          color: item
+                                                                  .isDirectory
+                                                              ? Colors.amber
+                                                              : _getColorForExtension(
+                                                                  item.name),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                if (item.isSelected)
+                                                  const Icon(Icons.check_circle,
+                                                      color: Colors.green,
+                                                      size: 18),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            if (!item.isDirectory &&
+                                                _isPlayableMedia(item.name))
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  InkWell(
+                                                    onTap: () {
+                                                      Navigator.push(
+                                                          context,
+                                                          MaterialPageRoute(
+                                                            builder: (_) =>
+                                                                MediaPlayerScreen(
+                                                                    url: item
+                                                                        .url,
+                                                                    title: item
+                                                                        .name),
+                                                          ));
+                                                    },
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                              4),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black45,
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(20),
+                                                      ),
+                                                      child: const Icon(
+                                                          Icons.play_arrow,
+                                                          color: Colors.white,
+                                                          size: 20),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  InkWell(
+                                                    onTap: () =>
+                                                        _showItemOptions(
+                                                            context, item),
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                              4),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black45,
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(20),
+                                                      ),
+                                                      child: const Icon(
+                                                          Icons.open_in_new,
+                                                          color: Colors.white,
+                                                          size: 20),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            if (!item.isDirectory &&
+                                                _isPlayableMedia(item.name))
+                                              const SizedBox(height: 4),
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 4.0),
+                                              child: Text(
+                                                item.name,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                style: const TextStyle(
+                                                    fontSize: 12),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                )
+                              : ListView.builder(
+                                  itemExtent: 72.0,
+                                  itemCount: browserState.items.length + 1,
+                                  itemBuilder: (context, index) {
+                                    if (index == browserState.items.length) {
+                                      return const SizedBox(height: 100);
+                                    }
+                                    final item = browserState.items[index];
+                                    return ListTile(
+                                      leading: Icon(
+                                        item.isDirectory
+                                            ? Icons.folder
+                                            : _getIconForExtension(item.name),
+                                        color: item.isDirectory
+                                            ? Colors.amber
+                                            : _getColorForExtension(item.name),
+                                      ),
+                                      title: Text(
+                                        item.name,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            fontSize: 13, height: 1.1),
+                                      ),
+                                      subtitle: item.size != null &&
+                                              item.size!.isNotEmpty
+                                          ? Text(item.size!,
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.blueAccent))
+                                          : null,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 0),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (!item.isDirectory &&
+                                              _isPlayableMedia(item.name))
+                                            IconButton(
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              icon: const Icon(
+                                                  Icons.play_circle_outline,
+                                                  color: Colors.blue,
+                                                  size: 22),
+                                              tooltip: 'Play in app',
+                                              onPressed: () {
+                                                final tunnelUrl = ProxyTunnel()
+                                                    .getTunnelUrl(item.url);
                                                 Navigator.push(
                                                     context,
                                                     MaterialPageRoute(
                                                       builder: (_) =>
                                                           MediaPlayerScreen(
-                                                              url: item.url,
+                                                              url: tunnelUrl,
                                                               title: item.name),
                                                     ));
                                               },
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.all(4),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black45,
-                                                  borderRadius:
-                                                      BorderRadius.circular(20),
-                                                ),
-                                                child: const Icon(
-                                                    Icons.play_arrow,
-                                                    color: Colors.white,
-                                                    size: 20),
-                                              ),
                                             ),
-                                            const SizedBox(width: 8),
-                                            InkWell(
-                                              onTap: () => _showItemOptions(
+                                          if (!item.isDirectory &&
+                                              _isPlayableMedia(item.name))
+                                            IconButton(
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              icon: const Icon(
+                                                  Icons.open_in_new,
+                                                  color: Colors.orange,
+                                                  size: 22),
+                                              tooltip: 'External options',
+                                              onPressed: () => _showItemOptions(
                                                   context, item),
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.all(4),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black45,
-                                                  borderRadius:
-                                                      BorderRadius.circular(20),
-                                                ),
-                                                child: const Icon(
-                                                    Icons.open_in_new,
-                                                    color: Colors.white,
-                                                    size: 20),
-                                              ),
                                             ),
-                                          ],
-                                        ),
-                                      if (!item.isDirectory &&
-                                          _isPlayableMedia(item.name))
-                                        const SizedBox(height: 4),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 4.0),
-                                        child: Text(
-                                          item.name,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
+                                          SizedBox(
+                                            width: 24,
+                                            child: Checkbox(
+                                              value: item.isSelected,
+                                              onChanged: (val) => browserState
+                                                  .toggleSelection(item),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                        : ListView.builder(
-                            itemExtent: 72.0,
-                            itemCount: browserState.items.length + 1,
-                            itemBuilder: (context, index) {
-                              if (index == browserState.items.length) {
-                                return const SizedBox(height: 100);
-                              }
-                              final item = browserState.items[index];
-                              return ListTile(
-                                leading: Icon(
-                                  item.isDirectory
-                                      ? Icons.folder
-                                      : _getIconForExtension(item.name),
-                                  color: item.isDirectory
-                                      ? Colors.amber
-                                      : _getColorForExtension(item.name),
-                                ),
-                                title: Text(
-                                  item.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 13, height: 1.1),
-                                ),
-                                subtitle:
-                                    item.size != null && item.size!.isNotEmpty
-                                        ? Text(item.size!,
-                                            style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.blueAccent))
-                                        : null,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 0),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (!item.isDirectory &&
-                                        _isPlayableMedia(item.name))
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        icon: const Icon(
-                                            Icons.play_circle_outline,
-                                            color: Colors.blue,
-                                            size: 22),
-                                        tooltip: 'Play in app',
-                                        onPressed: () {
-                                          final tunnelUrl = ProxyTunnel()
-                                              .getTunnelUrl(item.url);
-                                          Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    MediaPlayerScreen(
-                                                        url: tunnelUrl,
-                                                        title: item.name),
-                                              ));
-                                        },
-                                      ),
-                                    if (!item.isDirectory &&
-                                        _isPlayableMedia(item.name))
-                                      IconButton(
-                                        visualDensity: VisualDensity.compact,
-                                        icon: const Icon(Icons.open_in_new,
-                                            color: Colors.orange, size: 22),
-                                        tooltip: 'External options',
-                                        onPressed: () =>
-                                            _showItemOptions(context, item),
-                                      ),
-                                    SizedBox(
-                                      width: 24,
-                                      child: Checkbox(
-                                        value: item.isSelected,
-                                        onChanged: (val) =>
-                                            browserState.toggleSelection(item),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                onTap: () {
-                                  if (item.isDirectory) {
-                                    _urlCtrl.text = item.url;
-                                    browserState.loadUrl(item.url);
-                                  } else {
-                                    _showItemOptions(context, item);
-                                  }
-                                },
-                              );
-                            },
-                          )),
-          ),
-        ],
-      ),
+                                      onTap: () {
+                                        if (item.isDirectory) {
+                                          _urlCtrl.text = item.url;
+                                          browserState.loadUrl(item.url);
+                                        } else {
+                                          _showItemOptions(context, item);
+                                        }
+                                      },
+                                    );
+                                  },
+                                )),
+                ),
+              ],
+            ),
       floatingActionButton: browserState.getSelectedItems().isNotEmpty
           ? Padding(
               padding: const EdgeInsets.only(bottom: 90.0),
@@ -561,6 +600,103 @@ class _BrowserTabState extends State<BrowserTab> {
               ),
             )
           : null,
+    );
+  }
+
+  Widget _buildWebView(BuildContext context, BrowserProvider browserState) {
+    final initialUrl = browserState.currentUrl.isNotEmpty
+        ? WebUri(browserState.currentUrl)
+        : WebUri('http://new.circleftp.net/');
+
+    final mediaExtensions = [
+      'mp4',
+      'mkv',
+      'avi',
+      'mov',
+      'webm',
+      'mp3',
+      'flac',
+      'wav'
+    ];
+    final downloadExtensions = [
+      'zip',
+      'rar',
+      '7z',
+      'tar',
+      'gz',
+      'apk',
+      'pdf',
+      'iso',
+      'img'
+    ];
+
+    return InAppWebView(
+      key: ValueKey(initialUrl.toString()),
+      initialUrlRequest: URLRequest(url: initialUrl),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        mediaPlaybackRequiresUserGesture: false,
+        allowsInlineMediaPlayback: true,
+        useShouldOverrideUrlLoading: true,
+        useOnDownloadStart: true,
+        userAgent:
+            'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36',
+      ),
+      onWebViewCreated: (controller) {
+        // controller available if needed later
+      },
+      onLoadStart: (controller, url) {
+        if (url != null) {
+          _urlCtrl.text = url.toString();
+        }
+      },
+      onLoadStop: (controller, url) async {
+        if (url != null) {
+          _urlCtrl.text = url.toString();
+        }
+      },
+      shouldOverrideUrlLoading: (controller, navigationAction) async {
+        final url = navigationAction.request.url?.toString() ?? '';
+        final ext = url.split('?').first.split('.').last.toLowerCase();
+
+        if (mediaExtensions.contains(ext) || downloadExtensions.contains(ext)) {
+          final name = Uri.parse(url)
+              .pathSegments
+              .lastWhere((s) => s.isNotEmpty, orElse: () => 'file');
+
+          final item = DirectoryItem(
+            name: name,
+            url: url,
+            type: DirectoryItem.typeFromExtension(name),
+            size: null,
+          );
+
+          if (context.mounted) {
+            _showItemOptions(context, item);
+          }
+
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        return NavigationActionPolicy.ALLOW;
+      },
+      onDownloadStartRequest: (controller, request) {
+        final url = request.url.toString();
+        final name = Uri.parse(url)
+            .pathSegments
+            .lastWhere((s) => s.isNotEmpty, orElse: () => 'file');
+
+        final item = DirectoryItem(
+          name: name,
+          url: url,
+          type: DirectoryItem.typeFromExtension(name),
+          size: null,
+        );
+
+        if (context.mounted) {
+          _showItemOptions(context, item);
+        }
+      },
     );
   }
 

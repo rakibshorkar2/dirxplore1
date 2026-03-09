@@ -12,6 +12,7 @@ class BrowserProvider with ChangeNotifier {
   List<DirectoryItem> _items = [];
   bool _isLoading = false;
   String _errorMessage = '';
+  bool _isFallbackMode = false;
 
   List<Map<String, String>> _bookmarks = [];
 
@@ -29,6 +30,7 @@ class BrowserProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String get errorMessage => _errorMessage;
   bool get canGoBack => _history.length > 1;
+  bool get isFallbackMode => _isFallbackMode;
 
   List<Map<String, String>> get bookmarks => _bookmarks;
   bool get isCurrentBookmarked =>
@@ -49,6 +51,11 @@ class BrowserProvider with ChangeNotifier {
 
   void toggleViewMode() {
     _isGridView = !_isGridView;
+    notifyListeners();
+  }
+
+  void toggleFallbackMode() {
+    _isFallbackMode = !_isFallbackMode;
     notifyListeners();
   }
 
@@ -216,6 +223,14 @@ class BrowserProvider with ChangeNotifier {
 
       final htmlStr = response.data.toString();
       _items = await HtmlParserService.parseApacheDirectoryAsync(htmlStr, url);
+
+      // Auto-fallback check: If it's a 200 OK but we got 0 directory items,
+      // it's likely a custom website (like CircleFTP) and not a raw directory listing.
+      if (_items.isEmpty && htmlStr.isNotEmpty && htmlStr.contains('<html')) {
+        _isFallbackMode = true;
+      } else {
+        _isFallbackMode = false;
+      }
 
       _currentUrl = url;
       if (addToHistory) {
